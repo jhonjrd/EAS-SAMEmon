@@ -176,12 +176,41 @@ python tools/decode_audio.py recording.wav
 
 ### Start monitoring — local USB RTL-SDR
 ```bash
-# Channel 3 (162.450 MHz) — local device
+# Channel 3 (162.450 MHz) — local device index 0
 python pipeline.py --device 0 --channel 3 --gain 40
 
 # Channel 1 (162.400 MHz) — with tuner AGC and audio playback
 python pipeline.py --device 0 --channel 1 --tuner-agc --audio
 ```
+
+### Multi-dongle setup — selecting by EEPROM serial number
+
+When multiple RTL-SDR dongles are connected, USB enumeration order may change after a reboot, making `--device 0` unreliable. Use `--serial` to target a specific dongle by its EEPROM serial number instead.
+
+**Step 1 — List connected dongles and find their serials:**
+```bash
+python pipeline.py --list-devices-usb
+# Example output:
+#   [0] Generic RTL2832U OEM  serial=00000001
+#   [1] RTL-SDR Blog V4       serial=DONGLE01
+```
+
+**Step 2 — (Optional) Write a custom serial to the dongle's EEPROM:**
+```bash
+# Install rtl-sdr tools if not already present
+sudo apt install rtl-sdr         # Debian/Ubuntu
+
+# Write a descriptive serial to dongle at index 0 (e.g. "DONGLE01")
+rtl_eeprom -d 0 -s DONGLE01
+# Unplug and replug the dongle for the change to take effect
+```
+
+**Step 3 — Start monitoring by serial:**
+```bash
+python pipeline.py --serial DONGLE01 --channel 3 --gain 40
+```
+
+The `--serial` option is mutually exclusive with `--device` and `--host`.
 
 ### Start monitoring — remote RTL-TCP
 ```bash

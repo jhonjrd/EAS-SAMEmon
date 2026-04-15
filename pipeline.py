@@ -420,15 +420,18 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Local USB RTL-SDR (pyrtlsdr — requires librtlsdr.dll)
+  # Local USB RTL-SDR by index (pyrtlsdr — requires librtlsdr.dll)
   python pipeline.py --device 0 --channel 3 --gain 40
   python pipeline.py --device 0 --channel 1 --tuner-agc --audio
+
+  # Local USB RTL-SDR by EEPROM serial (stable across reboots — multi-dongle)
+  python pipeline.py --serial 00000001 --channel 3 --gain 40
 
   # Remote RTL-TCP
   python pipeline.py --host 192.168.1.10:1234 --channel 3 --gain 35
   python pipeline.py --host 10.0.0.5:5555 --channel 7 --gain 35 --ppm -3
 
-  # List connected USB dongles
+  # List connected USB dongles (shows index, name, and serial)
   python pipeline.py --list-devices-usb
         """,
     )
@@ -440,6 +443,11 @@ Examples:
     src.add_argument('--device', default=None, type=int, metavar='N',
                      help='Local USB RTL-SDR, device index (e.g.: 0). '
                           'Uses pyrtlsdr directly — no rtl_tcp or external processes required.')
+    src.add_argument('--serial', default=None, metavar='SERIAL',
+                     help='Local USB RTL-SDR, select dongle by EEPROM serial number '
+                          '(e.g.: "00000001"). Useful in multi-dongle setups where USB '
+                          'enumeration order may change across reboots. '
+                          'Use --list-devices-usb to see serials.')
 
     p.add_argument('--port', default=1234, type=int,
                    help='RTL-TCP port when --host is used (default: 1234). '
@@ -531,7 +539,8 @@ def main():
         if devs:
             print('\nConnected USB RTL-SDR Dongles:\n')
             for d in devs:
-                print(f"  [{d['index']}] {d['name']}")
+                serial_str = f"  serial={d['serial']}" if d.get('serial') else ''
+                print(f"  [{d['index']}] {d['name']}{serial_str}")
         else:
             print('\nNo RTL-SDR dongles found (or pyrtlsdr is not installed).\n'
                   '  → pip install pyrtlsdr\n')
@@ -601,13 +610,30 @@ def main():
     # Determine initial mode: CLI takes precedence; if no CLI, saved preference wins
     if args.host:
         last_mode = 'TCP'
-    elif args.device is not None:
+    elif args.device is not None or args.serial is not None:
         last_mode = 'USB'
     else:
         last_mode = prefs.get('hardware_last_mode', 'TCP')
 
     # Priority 1: Explicit Command Line Arguments (CLI)
-    if args.device is not None:
+    if args.serial is not None:
+        # Resolve EEPROM serial → device index so the rest of the pipeline
+        # (preferences, web UI, logs) works uniformly with an index.
+        devs = PyRtlSdrSource.list_devices()
+        match = next((d for d in devs if d.get('serial') == args.serial), None)
+        if match is None:
+            serials_found = ', '.join(d.get('serial', '?') for d in devs) or 'none'
+            print(f'\nError: no RTL-SDR dongle with serial "{args.serial}" found.\n'
+                  f'  Available serials: {serials_found}\n'
+                  f'  Run: python pipeline.py --list-devices-usb\n')
+            return
+        device_idx = match['index']
+        ppm = hw_usb.get('ppm', 0)
+        source = PyRtlSdrSource(device_index=device_idx, ppm=ppm, **source_kwargs)
+        source_label = f'USB:{device_idx}'
+        last_mode = 'USB'
+        hw_usb.update({'device': device_idx, 'ppm': ppm})
+    elif args.device is not None:
         device_idx = args.device
         ppm = hw_usb.get('ppm', 0)
         source = PyRtlSdrSource(device_index=device_idx, ppm=ppm, **source_kwargs)

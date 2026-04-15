@@ -43,7 +43,11 @@ class PyRtlSdrSource:
     Parameters
     ----------
     device_index : int
-        Dongle index (0 if only one connected).
+        Dongle index (0 if only one connected). Ignored when *serial* is set.
+    serial : str or None
+        EEPROM serial number of the dongle (e.g. ``"00000001"``). When provided,
+        the dongle is opened by serial instead of by index, which is useful in
+        multi-dongle setups where USB enumeration order may change across reboots.
     freq : int
         Center frequency in Hz (e.g., 162_450_000).
     sample_rate : int
@@ -60,6 +64,7 @@ class PyRtlSdrSource:
 
     def __init__(self,
                  device_index: int = 0,
+                 serial:       str | None = None,
                  freq:         int   = 162_450_000,
                  sample_rate:  int   = 250_000,
                  gain:         float = 40.0,
@@ -67,6 +72,7 @@ class PyRtlSdrSource:
                  tuner_agc:    bool  = False,
                  rtl_agc:      bool  = False):
         self.device_index = device_index
+        self.serial       = serial
         self.freq         = freq
         self.sample_rate  = sample_rate
         self.gain         = gain
@@ -120,7 +126,10 @@ class PyRtlSdrSource:
             raise ImportError(msg) from e
 
         try:
-            self._sdr = RtlSdr(device_index=self.device_index)
+            if self.serial:
+                self._sdr = RtlSdr(serial_number=self.serial)
+            else:
+                self._sdr = RtlSdr(device_index=self.device_index)
         except Exception as e:
             err_msg = str(e).lower()
             if "undefined symbol" in err_msg or "rtlsdr_set_dithering" in err_msg or "entry point" in err_msg or "procedure not found" in err_msg:
@@ -164,8 +173,10 @@ class PyRtlSdrSource:
         gain_str = ('auto/Tuner-AGC' if (self.tuner_agc or self.gain == 0)
                     else f'{self.gain} dB')
         rtl_str  = 'RTL-AGC=ON' if self.rtl_agc else 'RTL-AGC=OFF'
+        device_label = (f'serial={self.serial}' if self.serial
+                        else f'index={self.device_index}')
         log.info(
-            f'PyRtlSdrSource started — device [{self.device_index}]  '
+            f'PyRtlSdrSource started — device [{device_label}]  '
             f'freq={self.freq/1e6:.3f} MHz  sr={self.sample_rate:,} Hz  '
             f'gain={gain_str}  {rtl_str}'
         )
@@ -248,8 +259,13 @@ class PyRtlSdrSource:
         reconnect assuming the package is already available.
         """
         from rtlsdr import RtlSdr
-        log.info(f'PyRtlSdrSource: reopening device [{self.device_index}]...')
-        self._sdr = RtlSdr(device_index=self.device_index)
+        device_label = (f'serial={self.serial}' if self.serial
+                        else f'index={self.device_index}')
+        log.info(f'PyRtlSdrSource: reopening device [{device_label}]...')
+        if self.serial:
+            self._sdr = RtlSdr(serial_number=self.serial)
+        else:
+            self._sdr = RtlSdr(device_index=self.device_index)
         self._sdr.sample_rate = self.sample_rate
         self._sdr.center_freq = self.freq
         if self.ppm != 0:
@@ -265,7 +281,7 @@ class PyRtlSdrSource:
             self._sdr.set_agc_mode(1 if self.rtl_agc else 0)
         except Exception:
             pass
-        log.info(f'PyRtlSdrSource: device [{self.device_index}] reopened successfully')
+        log.info(f'PyRtlSdrSource: device [{device_label}] reopened successfully')
 
     def _reader_loop(self):
         """
@@ -325,15 +341,74 @@ class PyRtlSdrSource:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def list_devices() -> list[dict]:
-        """List connected RTL-SDR dongles."""
+    def _load_librtlsdr():
+        """
+        Return a ctypes handle to librtlsdr.
+
+        Tries three paths in order:
+          1. The ctypes object already loaded inside pyrtlsdr (avoids double-load).
+          2. ctypes.util.find_library() system search.
+          3. Hard-coded platform-specific names as a last resort.
+        """
+        import ctypes, ctypes.util, platform
+
+        # Path 1 — grab the already-loaded ctypes object from pyrtlsdr internals
         try:
-            from rtlsdr import RtlSdr
-            count = RtlSdr.get_device_count()
+            import rtlsdr.rtlsdr as _mod
+            lib = getattr(_mod, 'librtlsdr', None)
+            if lib is not None:
+                return lib
+        except Exception:
+            pass
+
+        # Path 2 / 3 — load the shared library directly
+        sys_name = platform.system()
+        candidates: list[str] = []
+        found = ctypes.util.find_library('rtlsdr')
+        if found:
+            candidates.append(found)
+        if sys_name == 'Windows':
+            candidates += ['rtlsdr', 'librtlsdr', 'rtl_sdr']
+        else:
+            candidates += ['librtlsdr.so.0', 'librtlsdr.so']
+
+        for name in candidates:
+            try:
+                return ctypes.CDLL(name)
+            except OSError:
+                continue
+
+        return None
+
+    @staticmethod
+    def list_devices() -> list[dict]:
+        """List connected RTL-SDR dongles with index, name, and EEPROM serial.
+
+        Loads librtlsdr via ctypes directly so it works regardless of which
+        Python class (RtlSdr / RtlSdrAio) the installed pyrtlsdr version exposes.
+        """
+        try:
+            import ctypes
+            from ctypes import c_char_p, c_ubyte
+
+            lib = PyRtlSdrSource._load_librtlsdr()
+            if lib is None:
+                log.warning('librtlsdr shared library not found')
+                return []
+
+            lib.rtlsdr_get_device_name.restype = c_char_p
+            UBuf = c_ubyte * 256
+            count = lib.rtlsdr_get_device_count()
             result = []
             for i in range(count):
-                name = RtlSdr.get_device_name(i)
-                result.append({'index': i, 'name': name})
+                raw = lib.rtlsdr_get_device_name(i)
+                name = raw.decode('utf-8', errors='replace') if raw else f'Device {i}'
+                manufact = UBuf()
+                product  = UBuf()
+                serial   = UBuf()
+                lib.rtlsdr_get_device_usb_strings(i, manufact, product, serial)
+                serial_str = bytes(serial).rstrip(b'\x00').decode('utf-8', errors='replace')
+                result.append({'index': i, 'name': name, 'serial': serial_str})
             return result
         except ImportError:
             log.warning('pyrtlsdr not available')
