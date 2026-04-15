@@ -1,0 +1,2888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EAS-SAMEmon — SASMEX/EAS Monitor</title>
+<style>
+/* ── Reset & variables ──────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0d1117;
+  --surface:   #161b22;
+  --surface2:  #1c2128;
+  --border:    #30363d;
+  --text:      #e6edf3;
+  --text-dim:  #7d8590;
+  --blue:      #58a6ff;
+  --green:     #3fb950;
+  --yellow:    #d29922;
+  --orange:    #f0883e;
+  --red:       #f85149;
+  --red-dim:   #3d1a1a;
+  --purple:    #bc8cff;
+  --font:      'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Code', 'Consolas', monospace;
+  --header-btn-bg: rgba(255, 255, 255, 0.05);
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Layout ─────────────────────────────────────────────────── */
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+#dashboard-container {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  flex: 1;
+  gap: 16px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+/* ── Responsive: tablet ─────────────────────────────────────── */
+@media (max-width: 1000px) {
+  #dashboard-container { grid-template-columns: 1fr; }
+}
+
+/* ── Responsive: small tablet / large phone (≤ 860px) ───────── */
+@media (max-width: 860px) {
+  .hpill-gain, .hpill-uptime { display: none; }
+  .hpill { padding: 3px 10px; font-size: 11px; gap: 5px; }
+  .header-btn { width: 30px; height: 30px; font-size: 14px; }
+  #header { gap: 6px; padding: 8px 14px; }
+  .header-right { gap: 5px; }
+}
+
+/* ── Responsive: mobile (≤ 640px) ───────────────────────────── */
+@media (max-width: 640px) {
+  /* Header wraps: logo on row 1, all controls on row 2 */
+  #header {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 6px;
+    align-items: center;
+  }
+  #header .logo { font-size: 16px; }
+  .header-right {
+    flex-wrap: wrap;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+    gap: 5px;
+  }
+  /* Action buttons group: keep compact */
+  .header-btn { width: 30px; height: 30px; font-size: 13px; }
+  /* Status pills wrap below buttons */
+  .hpill { padding: 3px 8px; font-size: 11px; gap: 4px; }
+  .hpill-source { display: none; }
+  /* Dashboard: single column with reduced padding */
+  #dashboard-container { padding: 10px; gap: 10px; }
+  /* Card padding reduction */
+  .card { padding: 12px; }
+  /* Tables: always scroll horizontally */
+  #msg-table-wrap, #hist-table-wrap { overflow-x: auto; }
+  table { font-size: 12px; }
+  thead th { padding: 5px 8px; font-size: 10px; }
+  tbody td { padding: 6px 8px; }
+}
+
+/* ── Responsive: compact mobile (≤ 420px) ───────────────────── */
+@media (max-width: 420px) {
+  #header .logo { display: none; }   /* reclaim space on very small screens */
+  .hpill-freq { display: none; }
+  .header-right { justify-content: flex-start; }
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.main-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  padding-right: 4px; /* scrollbar space */
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+#header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.header-btn {
+  background: var(--header-btn-bg);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 16px;
+}
+.header-btn:hover {
+  background: var(--border);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.header-btn.active {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: rgba(88, 166, 255, 0.1);
+}
+.header-btn.denied {
+  color: var(--orange);
+  opacity: 0.6;
+}
+.ctrl-inline .ctrl-label {
+  margin-right: 12px;
+}
+.header-btn.ha-btn:hover {
+  color: #03a9f4 !important;
+  border-color: #03a9f4 !important;
+  background: rgba(3, 169, 244, 0.1) !important;
+}
+.header-btn.hw-btn {
+  background-image: url('https://www.rtl-sdr.com/wp-content/uploads/2022/12/rtl-sdrv3-1019x1024.jpg');
+  background-size: 26px;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: grayscale(1) invert(1) brightness(2); /* Make it fit the dark theme UI */
+}
+.header-btn.hw-btn:hover {
+  filter: none;
+  border-color: var(--blue);
+}
+
+#header .logo {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--blue);
+  letter-spacing: 0.5px;
+}
+#header .logo span { color: var(--text-dim); font-weight: 400; }
+
+.hpill {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: border-color 0.2s, background 0.2s;
+}
+.hpill:hover {
+  border-color: var(--text-dim);
+  background: var(--surface);
+}
+.hpill b { color: var(--text); }
+
+#conn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  display: inline-block;
+  transition: background .3s;
+}
+#conn-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+.sidebar-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Card base ──────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.card-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+/* ── Signal card ────────────────────────────────────────────── */
+.sig-row { margin-bottom: 10px; }
+.sig-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 3px;
+  display: flex;
+  justify-content: space-between;
+}
+.sig-label span { color: var(--text); font-family: var(--font-mono); }
+.bar-track { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+.bar-fill  { height: 100%; border-radius: 3px; transition: width .4s ease; }
+#level-bar { background: linear-gradient(to right, var(--green), var(--yellow), var(--red)); }
+#snr-bar   { background: var(--blue); }
+
+.squelch-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  margin-top: 4px;
+}
+.squelch-badge.open     { background: #1a3d2a; color: var(--green); border: 1px solid #2d5a3d; }
+.squelch-badge.closed   { background: #3d1a1a; color: var(--red);   border: 1px solid #5a2d2d; }
+.squelch-badge.disabled { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+
+/* ── Audio card ─────────────────────────────────────────────── */
+.audio-top {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.btn-play {
+  background: var(--green);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity .15s, background .2s;
+}
+.btn-play:hover  { opacity: 0.85; }
+.btn-play.stop   { background: var(--red); color: #fff; }
+
+.audio-status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.audio-status.on       { color: var(--green); }
+.audio-status.buffering{ color: var(--yellow); }
+
+/* ── Controls card ──────────────────────────────────────────── */
+.ctrl-section {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+.ctrl-section:last-child { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+
+.ctrl-row { margin-bottom: 10px; }
+.ctrl-row:last-child { margin-bottom: 0; }
+
+.ctrl-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+  display: flex;
+  align-items: center;
+}
+
+/* Tooltip */
+.tooltip {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+  margin-left: 5px;
+  color: var(--blue);
+  font-size: 13px;
+  line-height: 1;
+}
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 180px;
+  background-color: var(--surface2);
+  color: var(--text);
+  text-align: center;
+  border-radius: 6px;
+  padding: 8px;
+  position: absolute;
+  z-index: 100;
+  bottom: 150%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.2s;
+  border: 1px solid var(--border);
+  box-shadow: 0 5px 15px rgba(0,0,0,0.4);
+  font-size: 11px;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.4;
+  pointer-events: none;
+}
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+
+.ctrl-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.ctrl-input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 5px 10px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  outline: none;
+  transition: border-color .2s;
+  min-width: 0;
+}
+.ctrl-input:focus { border-color: var(--blue); }
+
+.btn-apply {
+  background: var(--blue);
+  color: #0d1117;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity .15s;
+}
+.btn-apply:hover  { opacity: 0.85; }
+.btn-apply:active { opacity: 0.7;  }
+
+/* Inline row (label + toggle) */
+.ctrl-inline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.ctrl-inline:last-child { margin-bottom: 0; }
+.ctrl-inline .ctrl-label { margin-bottom: 0; }
+
+/* Toggle switch */
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-track {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  transition: .2s;
+}
+.toggle-track::before {
+  content: '';
+  position: absolute;
+  width: 14px; height: 14px;
+  left: 2px; bottom: 2px;
+  background: var(--text-dim);
+  border-radius: 50%;
+  transition: .2s;
+}
+.toggle input:checked + .toggle-track {
+  background: #1a3d2a;
+  border-color: var(--green);
+}
+.toggle input:checked + .toggle-track::before {
+  transform: translateX(18px);
+  background: var(--green);
+}
+
+/* Sliders */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.slider-row input[type=range] {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--surface2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.slider-row input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--blue);
+  cursor: pointer;
+}
+.slider-row input[type=range]::-moz-range-thumb {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--blue);
+  border: none;
+  cursor: pointer;
+}
+.slider-val {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  min-width: 48px;
+  text-align: right;
+}
+
+/* Event filter chips */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+.chip {
+  padding: 2px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-dim);
+  transition: all .15s;
+  letter-spacing: .5px;
+  user-select: none;
+}
+.chip:hover { border-color: var(--text-dim); color: var(--text); }
+.chip.on-all  { background: #0d1a3d; color: var(--blue);   border-color: #2a4a8a; }
+.chip.on-eqw  { background: #3d1a1a; color: var(--red);    border-color: #5a2d2d; }
+.chip.on-test { background: #2d2300; color: var(--yellow);  border-color: #5a4800; }
+.chip.on-other{ background: #1a2d1a; color: var(--green);   border-color: #2d5a2d; }
+
+/* ── Alert card ─────────────────────────────────────────────── */
+#alert-card {
+  transition: border-color .3s, background .3s;
+  min-height: 110px;
+}
+#alert-card.active-eqw {
+  border-color: var(--red);
+  background: var(--red-dim);
+  animation: pulse-border 1.2s ease-in-out infinite;
+}
+@keyframes pulse-border {
+  0%,100% { border-color: var(--red);   box-shadow: 0 0 0 0 rgba(248,81,73,.4); }
+  50%      { border-color: #ff8080;     box-shadow: 0 0 0 6px rgba(248,81,73,0); }
+}
+#alert-card.active-other { border-color: var(--yellow); background: #2d2300; }
+
+#no-alert {
+  color: var(--text-dim);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 70px;
+}
+#alert-body { display: none; }
+#alert-body.visible { display: block; }
+
+.alert-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.alert-badge .dot { width: 10px; height: 10px; border-radius: 50%; }
+.alert-badge.eqw   { color: var(--red);    }
+.alert-badge.eqw  .dot { background: var(--red);    box-shadow: 0 0 8px var(--red); }
+.alert-badge.test  { color: var(--yellow); }
+.alert-badge.test .dot { background: var(--yellow); }
+.alert-badge.other { color: var(--orange); }
+.alert-badge.other .dot{ background: var(--orange); }
+
+#alert-event   { font-size: 15px; color: var(--text); margin-bottom: 6px; }
+#alert-details { font-size: 12px; color: var(--text-dim); line-height: 1.8; }
+#alert-details strong { color: var(--text); }
+
+/* ── Main content area ──────────────────────────────────────── */
+#main-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Messages table ─────────────────────────────────────────── */
+#msg-table-wrap { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+thead th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+tbody tr { border-bottom: 1px solid var(--border); transition: background .15s; }
+tbody tr:hover { background: var(--surface2); }
+tbody tr:last-child { border-bottom: none; }
+tbody td { padding: 7px 10px; vertical-align: middle; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+}
+.badge-eqw   { background: #3d1a1a; color: var(--red);    border: 1px solid #5a2d2d; }
+.badge-test  { background: #2d2300; color: var(--yellow);  border: 1px solid #5a4800; }
+.badge-other { background: #2d1a00; color: var(--orange);  border: 1px solid #5a3600; }
+.badge-mx    { background: #0d2a0d; color: var(--green);   border: 1px solid #1a4a1a; }
+.badge-us    { background: #0d1a3d; color: var(--blue);    border: 1px solid #1a3a6a; }
+.badge-ca    { background: #2d0d2d; color: var(--purple);  border: 1px solid #5a1a5a; }
+
+.mono { font-family: var(--font-mono); font-size: 12px; }
+.dim  { color: var(--text-dim); }
+#no-messages { text-align: center; color: var(--text-dim); padding: 24px; font-size: 13px; }
+
+/* ── History card ───────────────────────────────────────────── */
+.hist-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.hist-title-row.expanded { margin-bottom: 14px; }
+
+.btn-hist {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--blue);
+  font-size: 12px;
+  padding: 3px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: background .15s, color .15s;
+}
+.btn-hist:hover { background: var(--surface2); }
+.btn-hist.open  { color: var(--text-dim); border-color: var(--border); }
+
+.btn-del {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.2s, transform 0.1s, color 0.2s;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+.btn-del:hover {
+  opacity: 1;
+  transform: scale(1.1);
+  color: var(--red);
+}
+.btn-del.small {
+  font-size: 13px;
+  padding: 4px;
+  margin-right: 4px;
+}
+
+#history-body { display: none; }
+
+.hist-range {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.hist-range > div { display: flex; flex-direction: column; }
+
+.hist-info {
+  font-size: 12px;
+  color: var(--text-dim);
+  min-height: 16px;
+  margin-bottom: 2px;
+}
+.hist-info.loading  { color: var(--yellow); }
+.hist-info.results  { color: var(--green);  }
+.hist-info.empty    { color: var(--text-dim); }
+.hist-info.error    { color: var(--red);    }
+
+#hist-table-wrap { display: none; overflow-x: auto; margin-top: 10px; }
+
+/* ── Log feed ───────────────────────────────────────────────── */
+#log-feed {
+  max-height: 160px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column-reverse;
+}
+#log-feed::-webkit-scrollbar { width: 4px; }
+#log-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.log-entry { padding: 2px 0; display: flex; gap: 10px; line-height: 1.6; }
+.log-time  { color: var(--text-dim); flex-shrink: 0; }
+.log-text  { flex: 1; word-break: break-all; }
+.log-text.ok    { color: var(--green);  }
+.log-text.warn  { color: var(--yellow); }
+.log-text.error { color: var(--red);    }
+.log-text.info  { color: var(--text);   }
+
+/* ── Footer ─────────────────────────────────────────────────── */
+#footer {
+  padding: 6px 20px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#footer a { color: #79c0ff; text-decoration: none; }
+#footer a:hover { text-decoration: underline; }
+
+/* ── Row-flash ──────────────────────────────────────────────── */
+.flash { animation: row-flash .8s ease-out; }
+
+/* ── Table rows clicables ───────────────────────────────────── */
+#msg-body tr, #hist-body tr {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+#msg-body tr:hover, #hist-body tr:hover {
+  background: var(--surface2);
+}
+
+/* ── Modales ────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.8);
+  backdrop-filter: blur(4px);
+  display: none; /* oculto por defecto */
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+}
+.modal-overlay.visible { display: flex; }
+
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 600px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  animation: modal-up 0.25s ease-out;
+}
+@keyframes modal-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.modal-title { font-weight: 700; color: var(--blue); letter-spacing: 0.5px; }
+.modal-close {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 20px;
+  transition: color 0.15s;
+}
+.modal-close:hover { color: var(--red); }
+
+.modal-body {
+  padding: 20px;
+}
+.raw-code-box {
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 15px;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  text-align: right;
+}
+.btn-close-modal {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-close-modal:hover { background: var(--border); }
+
+.info-btn {
+  background: none;
+  border: 1.5px solid var(--blue);
+  color: var(--blue);
+  border-radius: 50%;
+  width: 17px;
+  height: 17px;
+  font-size: 11px;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background .15s, color .15s;
+  line-height: 1;
+}
+.info-btn:hover { background: var(--blue); color: #fff; }
+
+/* ── Interactive Active Alert ────────────────────────────────── */
+#alert-card {
+  transition: transform 0.1s, border-color 0.15s, box-shadow 0.3s, background-color 0.3s;
+  cursor: pointer;
+  margin-bottom: 0; /* Unir visualmente con el ticker si se desea */
+}
+#alert-card:hover { border-color: var(--text-dim); }
+#alert-card:active { transform: scale(0.99); }
+
+/* Extreme Breathing Effect (Seismic Alert / Immediate Action) */
+@keyframes breathing-red {
+  0%   { background-color: var(--surface); box-shadow: 0 0 5px rgba(248, 81, 73, 0.2); }
+  50%  { background-color: #3d0a0a; box-shadow: 0 0 40px rgba(248, 81, 73, 0.8), inset 0 0 20px rgba(248, 81, 73, 0.3); }
+  100% { background-color: var(--surface); box-shadow: 0 0 5px rgba(248, 81, 73, 0.2); }
+}
+
+.alert-extreme {
+  animation: breathing-red 1.5s ease-in-out infinite!important;
+  border-color: var(--red)!important;
+}
+.alert-extreme #alert-event {
+  color: #fff;
+  text-shadow: 0 0 10px var(--red);
+  font-size: 1.4em;
+  transition: font-size 0.3s;
+}
+
+/* ── Broadcast Ticker ───────────────────────────────────────── */
+
+/* ── Broadcast Ticker ───────────────────────────────────────── */
+#ticker-wrap {
+  margin-top: -1px; /* Overlap borders with alert card */
+  border-top: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  padding: 0;
+  overflow: hidden;
+  display: none; /* oculto por defecto */
+  background: var(--surface2);
+  height: 32px;
+  display: none;
+  align-items: center;
+}
+#ticker-wrap.visible { display: flex; }
+
+.ticker-content {
+  white-space: nowrap;
+  padding-left: 100%;
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+  text-transform: uppercase;
+  animation: marquee 30s linear infinite;
+  will-change: transform;
+}
+
+@keyframes marquee {
+  0%   { transform: translate(0, 0); }
+  100% { transform: translate(-100%, 0); }
+}
+
+/* Temas del ticker */
+#ticker-wrap.ticker-eqw {
+  background: var(--red);
+  border-color: var(--red);
+}
+#ticker-wrap.ticker-eqw .ticker-content {
+  color: #fff;
+  text-shadow: 0 0 4px rgba(0,0,0,0.5);
+  animation-duration: 20s; /* Más rápido para emergencias reales */
+}
+
+#ticker-wrap.ticker-other {
+  border-color: var(--orange);
+  background: #2a1a0a;
+  color: var(--orange);
+}
+#ticker-wrap.ticker-other .ticker-content { color: var(--orange); }
+
+#ticker-wrap.ticker-test {
+  border-color: var(--blue);
+}
+#ticker-wrap.ticker-test .ticker-content { color: var(--blue); }
+
+.ctrl-inline .ctrl-label {
+  margin-right: 16px;
+}
+.audio-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.audio-status {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.8;
+  color: var(--text-dim);
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header id="header">
+    <div class="logo">EAS-SAME<span>mon</span></div>
+    <div class="header-right">
+      <button class="header-btn ha-btn" title="Home Assistant Settings" onclick="openHaModal()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M11.9922 1.3945a.7041.7041 0 00-.498.211L.1621 13.0977A.5634.5634 0 000 13.494a.567.567 0 00.5664.5664H2.67v8.0743c0 .2603.2104.4707.4707.4707h7.9473v-3.6836L8.037 15.8672a2.42 2.42 0 01-.9473.1933c-1.3379 0-2.4218-1.0868-2.4218-2.4257 0-1.339 1.084-2.4239 2.4218-2.4239 1.338 0 2.422 1.085 2.422 2.4239 0 .3359-.068.6563-.1915.9472l1.7676 1.7676v-5.375C10.2 10.615 9.5723 9.744 9.5723 8.7266c0-1.339 1.0859-2.4258 2.4238-2.4258 1.338 0 2.4219 1.0868 2.4219 2.4258 0 1.0174-.6259 1.8884-1.5137 2.248v5.375l1.7656-1.7676a2.4205 2.4205 0 01-.1914-.9472c0-1.339 1.086-2.4239 2.4238-2.4239 1.338 0 2.422 1.085 2.422 2.4239 0 1.3389-1.084 2.4257-2.422 2.4257a2.42 2.42 0 01-.9472-.1933l-3.0508 3.0547v3.6836h7.9473a.4702.4702 0 00.4707-.4707v-8.0743h2.1113a.5686.5686 0 00.3965-.162c.2233-.2185.2262-.5775.0078-.8008l-2.5156-2.5723V6.4707c0-.2603-.2104-.4727-.4707-.4727h-1.9649c-.2603 0-.4707.2124-.4707.4727v1.1035L12.5 1.6035a.7056.7056 0 00-.5078-.209zm.0039 6.3614c-.5352 0-.9688.4351-.9688.9707 0 .5355.4336.9687.9688.9687a.9683.9683 0 00.9687-.9687c0-.5356-.4335-.9707-.9687-.9707zM7.0898 12.666a.9683.9683 0 00-.9687.9688c0 .5355.4336.9707.9687.9707.5352 0 .9688-.4352.9688-.9707a.9683.9683 0 00-.9688-.9688zm9.8125 0c-.5351 0-.9707.4332-.9707.9688 0 .5355.4356.9707.9707.9707.5352 0 .9688-.4352.9688-.9707a.9683.9683 0 00-.9688-.9688Z" />
+        </svg>
+      </button>
+      <button class="header-btn hw-btn" title="RTL-SDR Hardware Settings" onclick="openHwModal()"></button>
+      <button id="notif-btn" class="header-btn" title="Desktop Notifications" onclick="requestNotifications()">
+        <span id="notif-icon">🔔</span>
+      </button>
+      <div class="hpill"><span id="conn-dot"></span> <b id="conn-label" data-i18n="conn.connecting">Connecting...</b></div>
+      <div class="hpill hpill-freq">📡 <b id="freq-val">—</b></div>
+      <div class="hpill hpill-source">🔌 <b id="source-val">—</b></div>
+      <div class="hpill hpill-gain">📶 <b id="gain-val">—</b></div>
+      <div class="hpill hpill-uptime">⏱ <b id="uptime-val">—</b></div>
+      <select id="lang-select" class="ctrl-input" style="width:70px; padding: 4px 6px; font-size:12px; font-weight:600; border-radius:8px; cursor:pointer;" onchange="setLang(this.value)" title="Language / Idioma">
+        <option value="EN">🇺🇸 EN</option>
+        <option value="ES">🇲🇽 ES</option>
+      </select>
+    </div>
+</header>
+
+  <!-- ── Dashboard Layout ──────────────────────────────────────── -->
+  <div id="dashboard-container">
+
+    <!-- Left Sidebar: Controls and Signal -->
+    <aside class="sidebar">
+
+      <!-- Receiver & Audio controls -->
+      <div class="card">
+        <div class="card-title" data-i18n="card.receiver">Receiver</div>
+
+        <div class="ctrl-section">
+          <div class="ctrl-row">
+            <label class="ctrl-label" data-i18n="ctrl.freq">Channel / Frequency</label>
+            <select id="freq-input" class="ctrl-input" style="width:100%" onchange="applyFreq()">
+              <option value="162.400">CH1 - 162.400 MHz</option>
+              <option value="162.425">CH2 - 162.425 MHz</option>
+              <option value="162.450">CH3 - 162.450 MHz</option>
+              <option value="162.475">CH4 - 162.475 MHz</option>
+              <option value="162.500">CH5 - 162.500 MHz</option>
+              <option value="162.525">CH6 - 162.525 MHz</option>
+              <option value="162.550">CH7 - 162.550 MHz</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="ctrl-section">
+          <label class="ctrl-label" data-i18n="ctrl.volume">Volume (browser)</label>
+          <div class="slider-row" style="margin-bottom: 12px;">
+            <input type="range" id="vol-slider" min="0" max="1" step="0.01" value="0.8" oninput="onVolume(this.value)">
+            <span class="slider-val" id="vol-val">80%</span>
+          </div>
+          <div class="audio-top">
+            <span class="audio-status" id="audio-status" style="padding-left: 2px;" data-i18n="audio.disconnected">Disconnected</span>
+            <button class="btn-play" id="audio-btn" style="width:100%" onclick="toggleAudio()" data-i18n="audio.listen">▶ Listen Audio</button>
+          </div>
+        </div>
+
+        <div class="ctrl-row" style="margin-top: 12px;">
+          <label class="ctrl-label" data-i18n="ctrl.eventFilter">Event filter</label>
+          <div class="chip-row" id="event-chips"></div>
+        </div>
+
+      </div>
+
+    </aside>
+
+    <!-- Main Content: Alerts and Messages -->
+    <main class="main-content">
+
+      <!-- Active Alert -->
+      <div class="card" id="alert-card" onclick="openRawModalFromState()">
+        <div class="card-title" data-i18n="card.alert">Active Alert</div>
+        <div id="no-alert" data-i18n="alert.none">No active alerts</div>
+        <div id="alert-body">
+          <div class="alert-badge" id="alert-badge">
+            <span class="dot"></span>
+            <span id="alert-eee">—</span>
+          </div>
+          <div id="alert-event">—</div>
+          <div id="alert-details"></div>
+        </div>
+      </div>
+
+      <!-- Broadcast Ticker (Scrolling Banner) -->
+      <div id="ticker-wrap" class="card">
+        <div id="ticker-text" class="ticker-content"></div>
+      </div>
+
+      <!-- Message feed -->
+      <div class="card" id="messages-card">
+        <div class="card-title" data-i18n="card.messages">Live Message Feed</div>
+        <div id="msg-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="th.time">Time</th><th data-i18n="th.type">Type</th><th data-i18n="th.event">Event</th><th data-i18n="th.country">Country</th>
+                <th data-i18n="th.org">Org.</th><th data-i18n="th.areas">Areas</th><th data-i18n="th.callsign">Callsign</th><th data-i18n="th.purge">Purge Time</th><th data-i18n="th.validUntil">Valid until</th>
+                <th style="text-align:right; white-space:nowrap">
+                  <input type="checkbox" title="Select all" onclick="toggleAllCheckboxes(this, 'msg-body')" style="margin-right:4px">
+                  <button class="btn-del small" onclick="deleteSelected('msg-body')" title="Delete selected">🗑️</button>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="msg-body">
+              <tr><td colspan="9" id="no-messages" data-i18n="msg.none">No messages received</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Historical Message Browser -->
+      <div class="card" id="history-card">
+        <div class="hist-title-row card-title" id="hist-title-row">
+          <span data-i18n="card.history">Historical Message Browser</span>
+          <button class="btn-hist" id="hist-toggle-btn" onclick="toggleHistory()" data-i18n="hist.view">
+            📂 View History
+          </button>
+        </div>
+        <div id="history-body">
+          <div class="hist-range">
+            <div>
+              <label class="ctrl-label" data-i18n="hist.from">From</label>
+              <input type="date" id="hist-from" class="ctrl-input">
+            </div>
+            <div>
+              <label class="ctrl-label" data-i18n="hist.to">To</label>
+              <input type="date" id="hist-to" class="ctrl-input">
+            </div>
+            <button class="btn-apply" onclick="loadHistory()" data-i18n="hist.search">Search</button>
+          </div>
+          <div class="hist-info" id="hist-info" data-i18n="hist.prompt">Select a range and press Search</div>
+          <div id="hist-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="th.received">Received</th><th data-i18n="th.type">Type</th><th data-i18n="th.event">Event</th><th data-i18n="th.country">Country</th>
+                  <th data-i18n="th.org">Org.</th><th data-i18n="th.areas">Areas</th><th data-i18n="th.callsign">Callsign</th><th data-i18n="th.purge">Purge Time</th><th data-i18n="th.validUntil">Valid until</th>
+                  <th style="text-align:right; white-space:nowrap">
+                    <input type="checkbox" title="Select all" onclick="toggleAllCheckboxes(this, 'hist-body')" style="margin-right:4px">
+                    <button class="btn-del small" onclick="deleteSelected('hist-body')" title="Delete selected">🗑️</button>
+                  </th>
+                </tr>
+              </thead>
+              <tbody id="hist-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity Log -->
+      <div class="card">
+        <div class="card-title" data-i18n="card.log">Activity Log</div>
+        <div id="log-feed"></div>
+      </div>
+
+    </main>
+
+  </div> <!-- /dashboard-container -->
+
+  <!-- ── Footer ──────────────────────────────────────────────── -->
+  <footer id="footer">
+    <span data-i18n="footer.by"><a href="https://github.com/jhonjrd/EAS-SAMEmon" target="_blank" rel="noopener"><strong>EAS-SAMEmon</strong></a> &mdash; Real-time EAS-SAME Monitor &mdash; by <a href="https://github.com/jhonjrd" target="_blank" rel="noopener">Jhon J. Rodríguez D.</a></span>
+    <span id="msg-count" data-i18n-count="0">0 messages received</span>
+  </footer>
+
+  <!-- Modal for RAW visualization -->
+  <div id="modal-overlay" class="modal-overlay" onclick="closeRawModal(event)">
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title" data-i18n="modal.rawTitle">Message Details (SAME Raw)</div>
+        <div class="modal-close" onclick="closeRawModal()">&times;</div>
+      </div>
+      <div class="modal-body">
+        <div id="modal-content" class="raw-code-box" data-i18n="modal.loading">Loading...</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-close-modal" onclick="closeRawModal()" data-i18n="modal.close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Home Assistant Settings Modal -->
+  <div id="ha-modal-overlay" class="modal-overlay" onclick="closeHaModal(event)">
+    <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 450px;">
+      <div class="modal-header">
+        <div class="modal-title" data-i18n="ha.title">Home Assistant Integration</div>
+        <div class="modal-close" onclick="closeHaModal()">&times;</div>
+      </div>
+      <div class="modal-body">
+
+        <div class="ctrl-section">
+          <div class="ctrl-inline">
+            <label class="ctrl-label" style="display:flex; align-items:center; gap:7px;">
+              <span data-i18n="ha.webhook">Webhook URL</span>
+              <button class="info-btn" onclick="openWebhookHelp()" tabindex="-1" title="Setup instructions / Instrucciones">ⓘ</button>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="modal-webhook-enable">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="ctrl-row">
+            <input type="text" id="modal-webhook-url" class="ctrl-input" placeholder="http://HA-IP:8123/api/webhook/..." style="width:100%;">
+          </div>
+        </div>
+
+        <div id="ha-status-msg" style="display:none; margin-top:8px; padding:8px 12px; border-radius:6px; font-size:13px;"></div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn-close-modal" onclick="closeHaModal()" style="margin-right: 8px;" data-i18n="modal.cancel">Cancel</button>
+        <button class="btn-apply" id="ha-save-btn" onclick="saveHaSettingsFromModal()" data-i18n="ha.save">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Webhook Setup Help Modal -->
+  <div id="webhook-help-overlay" class="modal-overlay" onclick="closeWebhookHelp(event)" style="z-index: 10001;">
+    <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 510px;">
+      <div class="modal-header" style="background: #1c2128; border-bottom: 2px solid var(--blue);">
+        <div class="modal-title" data-i18n="ha.helpTitle">Configure Webhook in Home Assistant</div>
+        <div class="modal-close" onclick="closeWebhookHelp()">&times;</div>
+      </div>
+      <div class="modal-body" style="font-size: 13.5px; line-height: 1.75; max-height: 60vh; overflow-y: auto;">
+
+        <!-- English instructions -->
+        <div id="webhook-help-en">
+          <p style="margin: 0 0 14px; color: var(--text-dim);">Follow these steps to create a Home Assistant automation triggered by EAS-SAMEmon alerts:</p>
+          <ol style="margin: 0; padding-left: 22px;">
+            <li style="margin-bottom: 10px;">In Home Assistant, go to <strong>Settings → Automations &amp; Scenes</strong>.</li>
+            <li style="margin-bottom: 10px;">Click <strong>Create Automation → Create new automation</strong>.</li>
+            <li style="margin-bottom: 10px;">Under <strong>Triggers</strong>, click <strong>Add Trigger</strong> and select <strong>Webhook</strong>.</li>
+            <li style="margin-bottom: 10px;">A <strong>Webhook ID</strong> is generated automatically — you can also type a custom one (e.g. <code style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:12px;">eas-samemon-alert</code>).</li>
+            <li style="margin-bottom: 10px;">Enable <strong>Only accessible from the local network</strong> if EAS-SAMEmon runs on the same LAN.</li>
+            <li style="margin-bottom: 10px;">The URL to paste in EAS-SAMEmon is:<br>
+              <code style="background:var(--surface2);padding:5px 9px;border-radius:4px;display:block;margin-top:6px;font-size:12px;word-break:break-all;">http://&lt;HA-IP&gt;:8123/api/webhook/&lt;webhook-id&gt;</code>
+            </li>
+            <li>Add your desired actions (notification, alarm, script…), then <strong>Save</strong>. Paste the URL in EAS-SAMEmon, enable the toggle and save.</li>
+          </ol>
+        </div>
+
+        <!-- Spanish instructions -->
+        <div id="webhook-help-es" style="display:none;">
+          <p style="margin: 0 0 14px; color: var(--text-dim);">Sigue estos pasos para crear una automatización en Home Assistant disparada por alertas de EAS-SAMEmon:</p>
+          <ol style="margin: 0; padding-left: 22px;">
+            <li style="margin-bottom: 10px;">En Home Assistant, ve a <strong>Configuración → Automatizaciones y Escenas</strong>.</li>
+            <li style="margin-bottom: 10px;">Haz clic en <strong>Crear automatización → Nueva automatización</strong>.</li>
+            <li style="margin-bottom: 10px;">En <strong>Disparadores</strong>, haz clic en <strong>Agregar disparador</strong> y selecciona <strong>Webhook</strong>.</li>
+            <li style="margin-bottom: 10px;">Se genera un <strong>ID de Webhook</strong> automáticamente — también puedes escribir uno personalizado (ej. <code style="background:var(--surface2);padding:1px 6px;border-radius:3px;font-size:12px;">eas-samemon-alert</code>).</li>
+            <li style="margin-bottom: 10px;">Activa <strong>Solo accesible desde la red local</strong> si EAS-SAMEmon corre en la misma red.</li>
+            <li style="margin-bottom: 10px;">La URL que debes pegar en EAS-SAMEmon es:<br>
+              <code style="background:var(--surface2);padding:5px 9px;border-radius:4px;display:block;margin-top:6px;font-size:12px;word-break:break-all;">http://&lt;IP-HA&gt;:8123/api/webhook/&lt;webhook-id&gt;</code>
+            </li>
+            <li>Agrega las acciones deseadas (notificación, alarma, script…), luego <strong>Guarda</strong>. Pega la URL en EAS-SAMEmon, activa el interruptor y guarda.</li>
+          </ol>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn-apply" onclick="closeWebhookHelp()" data-i18n="modal.close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RTL-SDR Hardware Modal -->
+  <div id="hw-modal-overlay" class="modal-overlay" onclick="closeHwModal(event)">
+    <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 450px;">
+      <div class="modal-header" style="background: #1c2128; border-bottom: 2px solid var(--blue);">
+        <div class="modal-title" style="display: flex; align-items: center; gap: 10px;">
+          <img src="https://www.rtl-sdr.com/wp-content/uploads/2022/12/rtl-sdrv3-1019x1024.jpg" width="30" style="border-radius: 4px; filter: brightness(1.2);">
+          <span data-i18n="hw.title">RTL-SDR Hardware Settings</span>
+        </div>
+        <div class="modal-close" onclick="closeHwModal()">&times;</div>
+      </div>
+      <div class="modal-body">
+        <div class="ctrl-section">
+          <div style="display: flex; gap: 20px; align-items: center; margin-bottom: 12px;">
+            <div class="ctrl-inline" style="margin: 0; display: flex; align-items: center; gap: 15px;">
+              <label class="ctrl-label" style="margin-bottom: 0;" data-i18n="ctrl.tunerAgc">Tuner AGC</label>
+              <label class="toggle">
+                <input type="checkbox" id="agc-toggle" onchange="setTunerAgc(this.checked)">
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+            <div style="flex: 1;">
+              <label class="ctrl-label" id="hw-ppm-label" data-i18n="ctrl.freqCorr">Frequency Correction (PPM)</label>
+              <input type="number" id="ppm-input" class="ctrl-input" step="1" style="width: 100%;">
+            </div>
+          </div>
+
+          <div id="modal-gain-grp" style="margin-top: 15px;">
+            <label class="ctrl-label">
+              <span data-i18n="ctrl.gain">Manual Gain (dB)</span>
+              <span class="tooltip">ⓘ<span class="tooltiptext" data-i18n="hw.gainTip">Set gain 35-45 dB for optimal performance.</span></span>
+            </label>
+            <div class="slider-row" id="modal-gain-input-row">
+              <input type="range" id="gain-input" min="0" max="49.6" step="0.1" value="40" oninput="onGainSlider(this.value)">
+              <span class="slider-val" id="gain-val-label">40.0 dB</span>
+            </div>
+          </div>
+        </div>
+        <div class="ctrl-section">
+          <label class="ctrl-label" data-i18n="ctrl.connType">Connection Type</label>
+          <select id="hw-mode-input" class="ctrl-input" style="width:100%; margin-bottom: 12px;" onchange="toggleHwModeUI()">
+            <option value="TCP" data-i18n-opt="hw.optTcp">Remote (RTL-TCP)</option>
+            <option value="USB" data-i18n-opt="hw.optUsb">Local (USB Dongle)</option>
+          </select>
+
+          <div id="hw-device-grp" style="display:none;">
+            <label class="ctrl-label" data-i18n="ctrl.deviceIdx">Device Index</label>
+            <input type="number" id="hw-device-input" class="ctrl-input" min="0" value="0" style="width:100%;">
+          </div>
+
+          <div id="hw-tcp-grp">
+            <label class="ctrl-label" data-i18n="ctrl.hostPort">Host : Port</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="hw-host-input" class="ctrl-input" placeholder="127.0.0.1" style="flex: 2;">
+              <input type="number" id="hw-port-input" class="ctrl-input" placeholder="1234" style="flex: 1;">
+            </div>
+          </div>
+        </div>
+        <div class="ctrl-section">
+          <label class="ctrl-label" data-i18n="diag.title">Signal &amp; Diagnostics</label>
+          <div class="sig-row">
+            <div class="sig-label"><span data-i18n="diag.signalLevel">Signal Level</span> <span id="level-val">— dBFS</span></div>
+            <div class="bar-track"><div class="bar-fill" id="level-bar" style="width:0%"></div></div>
+          </div>
+          <div class="sig-row" style="margin-bottom: 10px;">
+            <div class="sig-label"><span data-i18n="diag.snr">SNR</span> <span id="snr-val">— dB</span></div>
+            <div class="bar-track"><div class="bar-fill" id="snr-bar" style="width:0%"></div></div>
+          </div>
+          <div style="background: var(--surface2); padding: 10px 12px; border-radius: 8px;">
+            <div class="ctrl-inline" style="margin-bottom: 6px;">
+              <span class="dim" data-i18n="diag.deviation">FM Deviation:</span>
+              <span id="dev-val" class="mono">—</span>
+            </div>
+            <div class="ctrl-inline">
+              <span class="dim" data-i18n="diag.throughput">Data Throughput:</span>
+              <span class="mono" id="chunks-diag">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-close-modal" onclick="closeHwModal()" style="margin-right: 8px;" data-i18n="modal.cancel">Cancel</button>
+        <button class="btn-apply" onclick="applyHardware()" data-i18n="hw.applyRestart">Apply &amp; Restart Source</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm / Alert Modal -->
+  <div id="confirm-modal-overlay" class="modal-overlay" onclick="_confirmModalBackdrop(event)">
+    <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 380px;">
+      <div class="modal-header">
+        <div class="modal-title" id="confirm-modal-title"></div>
+      </div>
+      <div class="modal-body" style="padding: 20px 24px;">
+        <p id="confirm-modal-message" style="margin: 0; line-height: 1.6; color: var(--text);"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="confirm-modal-cancel" class="btn-close-modal" onclick="_confirmModalResolve(false)" style="margin-right: 8px;" data-i18n="modal.cancel">Cancel</button>
+        <button id="confirm-modal-ok" class="btn-apply" onclick="_confirmModalResolve(true)"></button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ================================================================
+// Internacionalización (i18n)
+// ================================================================
+const TRANSLATIONS = {
+  EN: {
+    // Connection
+    'conn.connecting':  'Connecting...',
+    'conn.connected':   'Connected',
+    'conn.reconnecting':'Reconnecting...',
+    // Cards
+    'card.receiver':  'Receiver',
+    'card.alert':     'Active Alert',
+    'card.messages':  'Live Message Feed',
+    'card.history':   'Historical Message Browser',
+    'card.log':       'Activity Log',
+    // Controls
+    'ctrl.freq':       'Channel / Frequency',
+    'ctrl.volume':     'Volume (browser)',
+    'ctrl.eventFilter':'Event filter',
+    'ctrl.tunerAgc':   'Tuner AGC',
+    'ctrl.freqCorr':   'Frequency Correction (PPM)',
+    'ctrl.gain':       'Manual Gain (dB)',
+    'ctrl.connType':   'Connection Type',
+    'ctrl.deviceIdx':  'Device Index',
+    'ctrl.hostPort':   'Host : Port',
+    // Audio
+    'audio.disconnected': 'Disconnected',
+    'audio.playing':      '● Playing',
+    'audio.connecting':   '⟳ Connecting...',
+    'audio.listen':       '▶ Listen Audio',
+    'audio.stop':         '■ Stop',
+    // Alert
+    'alert.none':        'No active alerts',
+    'alert.org':         'Org',
+    'alert.country':     'Country',
+    'alert.areas':       'Areas',
+    'alert.callsign': 'Callsign',
+    'alert.validUntil':  'Valid until',
+    'alert.length':      'Purge time',
+    // Table headers
+    'th.time':        'Time',
+    'th.type':        'Type',
+    'th.event':       'Event',
+    'th.country':     'Country',
+    'th.org':         'Org.',
+    'th.areas':       'Areas',
+    'th.callsign': 'Callsign',
+    'th.purge':       'Purge Time',
+    'th.validUntil':  'Valid until',
+    'th.received':    'Received',
+    // History
+    'hist.view':    '📂 View History',
+    'hist.close':   '✕ Close',
+    'hist.from':    'From',
+    'hist.to':      'To',
+    'hist.search':  'Search',
+    'hist.prompt':  'Select a range and press Search',
+    'hist.noEvents':'No events in the selected range',
+    'hist.searching':'⟳ Searching...',
+    // Messages
+    'msg.none': 'No messages received',
+    'msg.count': n => `${n} message${n !== 1 ? 's' : ''} received`,
+    // Modal
+    'modal.rawTitle': 'Message Details (SAME Raw)',
+    'modal.close':    'Close',
+    'modal.cancel':   'Cancel',
+    'modal.loading':  'Loading...',
+    // HA modal
+    'ha.title':       'Home Assistant Integration',
+    'ha.webhook':     'Webhook URL',
+    'ha.save':        'Save Changes',
+    'ha.saved':       '✓ Settings saved successfully',
+    'ha.helpTitle':   'Configure Webhook in Home Assistant',
+    // HW modal
+    'hw.title':       'RTL-SDR Hardware Settings',
+    'hw.gainTip':     'Set gain 35-45 dB for optimal performance.',
+    'hw.applyRestart':'Apply & Restart Source',
+    'hw.optTcp':      'Remote (RTL-TCP)',
+    'hw.optUsb':      'Local (USB Dongle)',
+    'hw.saving':      'Saving...',
+    'hw.saved':       'Saved!',
+    // Diagnostics modal
+    'diag.title':      'System Diagnostics',
+    'diag.signalLevel':'Signal Level',
+    'diag.snr':        'SNR',
+    'diag.deviation':  'FM Deviation:',
+    'diag.throughput': 'Data Throughput:',
+    'diag.chunks': n => `${n} chunks processed`,
+    // Footer
+    'footer.by': 'EAS-SAMEmon by jhonjrd — Real-time EAS-SAME Monitor',
+    // Notifications
+    'notif.enabled':    'Notifications enabled',
+    'notif.blocked':    'Notifications blocked by browser',
+    'notif.enable':     'Enable desktop notifications',
+    'notif.noSupport':  'Your browser does not support notifications.',
+    'notif.success':    'Notifications enabled successfully',
+    // Delete dialogs
+    'del.title':       'Delete',
+    'del.selectFirst': 'Select at least one event to delete.',
+    'del.confirm':     n => `Permanently delete the ${n} selected event(s)?`,
+    'del.confirmOne':  'Delete this message permanently?',
+    // Generic modal buttons
+    'modal.ok':     'OK',
+    // Errors
+    'err.dateRange': '⚠ Select a date range',
+    'err.dateOrder': '⚠ "From" date must be before "To"',
+    'err.hwSave':    msg => `Hardware persistence error: ${msg}`,
+    'err.server':    'Error saving on server',
+    // Ticker
+    'ticker.entireArea':  'THE ENTIRE COVERAGE AREA',
+    'ticker.otherAreas':  n => `AND OTHER ${n} AREAS`,
+    'ticker.unspecified': 'UNSPECIFIED AREAS',
+    'ticker.msg': (sender, org, event, areas, time) =>
+      `${sender}: MESSAGE FROM ${sender} (${org}) -- A ${event} HAS BEEN ISSUED FOR: ${areas} - VALID UNTIL ${time}. (${sender})   `,
+    // Areas
+    'areas.affected':    n => `${n} affected areas`,
+    'area.allCoverage':  'Entire coverage area',
+    'area.complete':     'complete',
+    'area.wholeState':   s => `All of ${s}`,
+    // Events count in history
+    'events.n': (n, from, to) => `${n} event${n !== 1 ? 's' : ''} · from ${from} to ${to}`,
+  },
+  ES: {
+    // Connection
+    'conn.connecting':  'Conectando...',
+    'conn.connected':   'Conectado',
+    'conn.reconnecting':'Reconectando...',
+    // Cards
+    'card.receiver':  'Receptor',
+    'card.alert':     'Alerta Activa',
+    'card.messages':  'Feed de Mensajes en Vivo',
+    'card.history':   'Historial de Mensajes',
+    'card.log':       'Registro de Actividad',
+    // Controls
+    'ctrl.freq':       'Canal / Frecuencia',
+    'ctrl.volume':     'Volumen (navegador)',
+    'ctrl.eventFilter':'Filtro de eventos',
+    'ctrl.tunerAgc':   'AGC del Sintonizador',
+    'ctrl.freqCorr':   'Corrección de Frecuencia (PPM)',
+    'ctrl.gain':       'Ganancia Manual (dB)',
+    'ctrl.connType':   'Tipo de Conexión',
+    'ctrl.deviceIdx':  'Índice de Dispositivo',
+    'ctrl.hostPort':   'Host : Puerto',
+    // Audio
+    'audio.disconnected': 'Desconectado',
+    'audio.playing':      '● Reproduciendo',
+    'audio.connecting':   '⟳ Conectando...',
+    'audio.listen':       '▶ Escuchar Audio',
+    'audio.stop':         '■ Detener',
+    // Alert
+    'alert.none':        'Sin alertas activas',
+    'alert.org':         'Org.',
+    'alert.country':     'País',
+    'alert.areas':       'Áreas',
+    'alert.callsign': 'Indicativo',
+    'alert.validUntil':  'Válido hasta',
+    'alert.length':      'Tiempo de purga',
+    // Table headers
+    'th.time':        'Hora',
+    'th.type':        'Tipo',
+    'th.event':       'Evento',
+    'th.country':     'País',
+    'th.org':         'Org.',
+    'th.areas':       'Áreas',
+    'th.callsign': 'Indicativo',
+    'th.purge':       'Tiempo de Purga',
+    'th.validUntil':  'Válido hasta',
+    'th.received':    'Recibido',
+    // History
+    'hist.view':    '📂 Ver Historial',
+    'hist.close':   '✕ Cerrar',
+    'hist.from':    'Desde',
+    'hist.to':      'Hasta',
+    'hist.search':  'Buscar',
+    'hist.prompt':  'Selecciona un rango y presiona Buscar',
+    'hist.noEvents':'Sin eventos en el rango seleccionado',
+    'hist.searching':'⟳ Buscando...',
+    // Messages
+    'msg.none': 'Sin mensajes recibidos',
+    'msg.count': n => `${n} mensaje${n !== 1 ? 's' : ''} recibido${n !== 1 ? 's' : ''}`,
+    // Modal
+    'modal.rawTitle': 'Detalles del Mensaje (SAME Raw)',
+    'modal.close':    'Cerrar',
+    'modal.cancel':   'Cancelar',
+    'modal.loading':  'Cargando...',
+    // HA modal
+    'ha.title':       'Integración con Home Assistant',
+    'ha.webhook':     'URL de Webhook',
+    'ha.save':        'Guardar Cambios',
+    'ha.saved':       '✓ Configuración guardada correctamente',
+    'ha.helpTitle':   'Configurar Webhook en Home Assistant',
+    // HW modal
+    'hw.title':       'Configuración de Hardware RTL-SDR',
+    'hw.gainTip':     'Configura la ganancia entre 35-45 dB para rendimiento óptimo.',
+    'hw.applyRestart':'Aplicar y Reiniciar Fuente',
+    'hw.optTcp':      'Remoto (RTL-TCP)',
+    'hw.optUsb':      'Local (Dongle USB)',
+    'hw.saving':      'Guardando...',
+    'hw.saved':       '¡Guardado!',
+    // Diagnostics modal
+    'diag.title':      'Diagnósticos del Sistema',
+    'diag.signalLevel':'Nivel de Señal',
+    'diag.snr':        'SNR',
+    'diag.deviation':  'Desviación FM:',
+    'diag.throughput': 'Rendimiento de Datos:',
+    'diag.chunks': n => `${n} fragmentos procesados`,
+    // Footer
+    'footer.by': 'EAS-SAMEmon por jhonjrd — Monitor EAS-SAME en Tiempo Real',
+    // Notifications
+    'notif.enabled':   'Notificaciones activadas',
+    'notif.blocked':   'Notificaciones bloqueadas por el navegador',
+    'notif.enable':    'Activar notificaciones de escritorio',
+    'notif.noSupport': 'Tu navegador no soporta notificaciones.',
+    'notif.success':   'Notificaciones activadas correctamente',
+    // Delete dialogs
+    'del.title':       'Eliminar',
+    'del.selectFirst': 'Selecciona al menos un evento para eliminar.',
+    'del.confirm':     n => `¿Eliminar permanentemente los ${n} evento(s) seleccionado(s)?`,
+    'del.confirmOne':  '¿Eliminar este mensaje permanentemente?',
+    // Generic modal buttons
+    'modal.ok':     'OK',
+    // Errors
+    'err.dateRange': '⚠ Selecciona un rango de fechas',
+    'err.dateOrder': '⚠ La fecha "Desde" debe ser anterior a "Hasta"',
+    'err.hwSave':    msg => `Error de persistencia de hardware: ${msg}`,
+    'err.server':    'Error al guardar en el servidor',
+    // Ticker
+    'ticker.entireArea':  'TODA EL ÁREA DE COBERTURA',
+    'ticker.otherAreas':  n => `Y OTRAS ${n} ÁREAS`,
+    'ticker.unspecified': 'ÁREAS NO ESPECIFICADAS',
+    'ticker.msg': (sender, org, event, areas, time) =>
+      `${sender}: MENSAJE DE ${sender} (${org}) -- SE HA EMITIDO UNA ${event} PARA: ${areas} - VÁLIDA HASTA ${time}. (${sender})   `,
+    // Areas
+    'areas.affected':    n => `${n} áreas afectadas`,
+    'area.allCoverage':  'Área de cobertura completa',
+    'area.complete':     'completo',
+    'area.wholeState':   s => `Todo ${s}`,
+    // Events count in history
+    'events.n': (n, from, to) => `${n} evento${n !== 1 ? 's' : ''} · del ${from} al ${to}`,
+  },
+};
+
+// Spanish event name lookup (mirrors alertparser.py SAME__EEE_ES)
+const EEE_NAMES_ES = {
+  EAN:'Notificación de Acción de Emergencia', EAT:'Terminación de Acción de Emergencia',
+  NIC:'Centro Nacional de Información',       NPT:'Prueba Periódica Nacional',
+  RMT:'Prueba Mensual Requerida',             RWT:'Prueba Semanal Requerida',
+  DMO:'Advertencia de Práctica/Demostración', ADR:'Mensaje Administrativo',
+  EQW:'Alerta Sísmica (SASMEX)',
+  AVA:'Vigilancia de Avalancha',   AVW:'Advertencia de Avalancha',
+  BLU:'Alerta Azul',               CAE:'Emergencia de Sustracción de Menor (Alerta AMBER)',
+  CDW:'Advertencia de Peligro Civil', CEM:'Mensaje de Emergencia Civil',
+  EVI:'Evacuación Inmediata',      FRW:'Advertencia de Incendio',
+  HMW:'Advertencia de Materiales Peligrosos', LAE:'Emergencia de Área Local',
+  LEW:'Advertencia de Aplicación de Ley',     NUW:'Advertencia de Planta Nuclear',
+  RHW:'Advertencia de Peligro Radiológico',   SPW:'Advertencia de Refugio en el Lugar',
+  TOE:'Emergencia de Interrupción Telefónica 911', VOW:'Advertencia de Volcán',
+  BHW:'Advertencia de Peligro Biológico',     BWW:'Advertencia de Hervir Agua',
+  FCW:'Advertencia de Contaminación Alimentaria', IFW:'Advertencia de Incendio Industrial',
+  BZA:'Vigilancia de Tormenta de Nieve',  CFA:'Vigilancia de Inundación Costera',
+  DSA:'Vigilancia de Tormenta de Polvo',  EQA:'Vigilancia de Terremoto',
+  EVA:'Vigilancia de Evacuación',         EXA:'Vigilancia de Viento Extremo',
+  FFA:'Vigilancia de Inundación Repentina', FLA:'Vigilancia de Inundación',
+  HTA:'Vigilancia de Viento de Fuerza Huracán', HUA:'Vigilancia de Huracán',
+  HWA:'Vigilancia de Viento Fuerte',      SVA:'Vigilancia de Tormenta Severa',
+  TOA:'Vigilancia de Tornado',            TRA:'Vigilancia de Tormenta Tropical',
+  TSA:'Vigilancia de Tsunami',            WFA:'Vigilancia de Incendio Forestal',
+  WSA:'Vigilancia de Tormenta Invernal',
+  BZW:'Advertencia de Tormenta de Nieve', CFW:'Advertencia de Inundación Costera',
+  DSW:'Advertencia de Tormenta de Polvo', EWW:'Advertencia de Viento Extremo',
+  FFW:'Advertencia de Inundación Repentina', FLW:'Advertencia de Inundación',
+  FSW:'Advertencia de Congelamiento Repentino', FGW:'Advertencia de Niebla Densa',
+  HTW:'Advertencia de Viento de Fuerza Huracán', HUW:'Advertencia de Huracán',
+  HWW:'Advertencia de Viento Fuerte',     IBW:'Advertencia de Iceberg',
+  LSW:'Advertencia de Deslizamiento de Tierra', MAW:'Advertencia Marítima',
+  SMW:'Advertencia Marítima Especial',    SQW:'Advertencia de Chubasco de Nieve',
+  SSA:'Vigilancia de Marejada Ciclónica', SSW:'Advertencia de Marejada Ciclónica',
+  SVR:'Advertencia de Tormenta Severa',   TOR:'Advertencia de Tornado',
+  TRW:'Advertencia de Tormenta Tropical', TSW:'Advertencia de Tsunami',
+  WFW:'Advertencia de Incendio Forestal', WSW:'Advertencia de Tormenta Invernal',
+  FFS:'Declaración de Inundación Repentina', FLS:'Declaración de Inundación',
+  FLY:'Aviso de Inundación',              HLS:'Declaración Local de Huracán',
+  HWY:'Aviso de Viento Fuerte',           MWS:'Declaración de Clima Marítimo',
+  NOW:'Pronóstico a Corto Plazo',         POS:'Declaración de Corte de Energía',
+  SPS:'Declaración Especial del Tiempo',  SVS:'Declaración de Tiempo Severo',
+};
+
+// English event name lookup (mirrors alertparser.py SAME__EEE)
+const EEE_NAMES_EN = {
+  EAN:'Emergency Action Notification',     EAT:'Emergency Action Termination',
+  NIC:'National Information Center',       NPT:'National Periodic Test',
+  RMT:'Required Monthly Test',             RWT:'Required Weekly Test',
+  DMO:'Practice/Demo Warning',             ADR:'Administrative Message',
+  EQW:'Seismic Alert (SASMEX)',
+  AVA:'Avalanche Watch',     AVW:'Avalanche Warning',      BLU:'Blue Alert',
+  CAE:'Child Abduction Emergency (AMBER Alert)',            CDW:'Civil Danger Warning',
+  CEM:'Civil Emergency Message',           EVI:'Evacuation Immediate',
+  FRW:'Fire Warning',        HMW:'Hazardous Materials Warning',
+  LAE:'Local Area Emergency',LEW:'Law Enforcement Warning', NUW:'Nuclear Power Plant Warning',
+  RHW:'Radiological Hazard Warning',       SPW:'Shelter in Place Warning',
+  TOE:'911 Telephone Outage Emergency',    VOW:'Volcano Warning',
+  BHW:'Biological Hazard Warning',         BWW:'Boil Water Warning',
+  FCW:'Food Contamination Warning',        IFW:'Industrial Fire Warning',
+  BZA:'Blizzard Watch',      CFA:'Coastal Flood Watch',    DSA:'Dust Storm Watch',
+  EQA:'Earthquake Watch',    EVA:'Evacuation Watch',       EXA:'Extreme Wind Watch',
+  FFA:'Flash Flood Watch',   FLA:'Flood Watch',            HTA:'Hurricane Force Wind Watch',
+  HUA:'Hurricane Watch',     HWA:'High Wind Watch',        SVA:'Severe Thunderstorm Watch',
+  TOA:'Tornado Watch',       TRA:'Tropical Storm Watch',   TSA:'Tsunami Watch',
+  WFA:'Wildfire Watch',      WSA:'Winter Storm Watch',
+  BZW:'Blizzard Warning',    CFW:'Coastal Flood Warning',  DSW:'Dust Storm Warning',
+  EWW:'Extreme Wind Warning',FFW:'Flash Flood Warning',    FLW:'Flood Warning',
+  FSW:'Flash Freeze Warning',FGW:'Dense Fog Warning',      HTW:'Hurricane Force Wind Warning',
+  HUW:'Hurricane Warning',   HWW:'High Wind Warning',      IBW:'Iceberg Warning',
+  LSW:'Land Slide Warning',  MAW:'Marine Warning',          SMW:'Special Marine Warning',
+  SQW:'Snow Squall Warning', SSA:'Storm Surge Watch',       SSW:'Storm Surge Warning',
+  SVR:'Severe Thunderstorm Warning',       TOR:'Tornado Warning',
+  TRW:'Tropical Storm Warning',            TSW:'Tsunami Warning',
+  WFW:'Wildfire Warning',    WSW:'Winter Storm Warning',
+  FFS:'Flash Flood Statement',FLS:'Flood Statement',       FLY:'Flood Advisory',
+  HLS:'Hurricane Local Statement',         HWY:'High Wind Advisory',
+  MWS:'Marine Weather Statement',          NOW:'Short Term Forecast',
+  POS:'Power Outage Statement',            SPS:'Special Weather Statement',
+  SVS:'Severe Weather Statement',
+};
+
+// Organization name lookup (mirrors alertparser.py SAME__ORG / SAME__ORG_ES)
+const ORG_NAMES = {
+  EN: {
+    EAS: {US:'Emergency Alert System',   CA:'Emergency Alert System',   MX:'Emergency Alert System'},
+    WXR: {US:'National Weather Service', CA:'Environment Canada',       MX:'National Weather Service'},
+    CIV: {US:'Civil Authorities',        CA:'Civil Authorities',        MX:'SASMEX'},
+    CTV: {US:'Civil Authorities',        CA:'Civil Authorities',        MX:'Civil Authority'},
+    PEP: {US:'Primary Entry Point',      CA:'Primary Entry Point',      MX:'Primary Entry Point'},
+  },
+  ES: {
+    EAS: {US:'Sistema de Alerta de Emergencias', CA:'Sistema de Alerta de Emergencias', MX:'Sistema de Alerta de Emergencias'},
+    WXR: {US:'Servicio Nacional de Meteorología',CA:'Medio Ambiente Canadá',            MX:'Servicio Meteorológico Nacional'},
+    CIV: {US:'Autoridades Civiles',              CA:'Autoridades Civiles',              MX:'SASMEX'},
+    CTV: {US:'Autoridades Civiles',              CA:'Autoridades Civiles',              MX:'Autoridad Civil'},
+    PEP: {US:'Punto de Entrada Principal',       CA:'Punto de Entrada Principal',       MX:'Punto de Entrada Principal'},
+  },
+};
+
+let currentLang = localStorage.getItem('eas-samemon-lang') || 'EN';
+
+function t(key, ...args) {
+  const val = (TRANSLATIONS[currentLang] || TRANSLATIONS.EN)[key]
+           ?? (TRANSLATIONS.EN)[key]
+           ?? key;
+  return typeof val === 'function' ? val(...args) : val;
+}
+
+function getEventName(msg) {
+  const code = msg.EEE || '';
+  // Prefer the event name already resolved by alertparser (country-aware)
+  if (msg.event) return msg.event;
+  if (currentLang === 'ES') return EEE_NAMES_ES[code] || EEE_NAMES_EN[code] || code || '—';
+  return EEE_NAMES_EN[code] || code || '—';
+}
+
+function getOrgName(msg) {
+  const org     = msg.ORG     || '';
+  const country = msg.COUNTRY || 'US';
+  const dict    = ORG_NAMES[currentLang] || ORG_NAMES.EN;
+  const entry   = dict[org];
+  if (entry) return entry[country] || entry.US || org;
+  return org || '—';
+}
+
+function setLang(lang) {
+  currentLang = lang;
+  localStorage.setItem('eas-samemon-lang', lang);
+  document.getElementById('lang-select').value = lang;
+  applyTranslations();
+  // Re-render all message content with new language
+  reRenderLive();
+  if (lastAlertMsg) updateAlert(true, lastAlertMsg);
+  if (lastHistoryEvents.length > 0) renderHistoryTable(lastHistoryEvents);
+  // Sync language preference to backend
+  sendCtrl('set_lang', lang);
+}
+
+function applyTranslations() {
+  // Static text via data-i18n
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const val = t(key);
+    if (typeof val === 'string') el.textContent = val;
+  });
+  // Placeholder attributes
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    el.placeholder = t(key);
+  });
+  // Select option text
+  document.querySelectorAll('[data-i18n-opt]').forEach(el => {
+    const key = el.getAttribute('data-i18n-opt');
+    el.textContent = t(key);
+  });
+  // Footer: re-render with HTML (contains strong/em)
+  const footerSpan = document.querySelector('#footer [data-i18n="footer.by"]');
+  if (footerSpan) {
+    if (currentLang === 'ES') {
+      footerSpan.innerHTML = '<a href="https://github.com/jhonjrd/EAS-SAMEmon" target="_blank" rel="noopener"><strong>EAS-SAMEmon</strong></a> &mdash; Monitor EAS-SAME en Tiempo Real &mdash; por <a href="https://github.com/jhonjrd" target="_blank" rel="noopener">Jhon J. Rodríguez D.</a>';
+    } else {
+      footerSpan.innerHTML = '<a href="https://github.com/jhonjrd/EAS-SAMEmon" target="_blank" rel="noopener"><strong>EAS-SAMEmon</strong></a> &mdash; Real-time EAS-SAME Monitor &mdash; by <a href="https://github.com/jhonjrd" target="_blank" rel="noopener">Jhon J. Rodríguez D.</a>';
+    }
+  }
+  // Update msg count text
+  const msgCountEl = document.getElementById('msg-count');
+  if (msgCountEl) msgCountEl.textContent = t('msg.count', msgCount);
+  // Update chunks-diag if visible
+  updateChunksDiag();
+  // Update audio UI state labels (non-destructive)
+  const audioBtn = document.getElementById('audio-btn');
+  const audioStatus = document.getElementById('audio-status');
+  if (audioBtn && audioStatus) {
+    if (!audioActive) {
+      audioBtn.textContent = t('audio.listen');
+      audioStatus.textContent = t('audio.disconnected');
+    }
+    // If active, setAudioUI will handle next state change
+  }
+  // Re-render history toggle button label
+  const histBtn = document.getElementById('hist-toggle-btn');
+  if (histBtn) {
+    const histOpen = window.getComputedStyle(document.getElementById('history-body')).display !== 'none';
+    histBtn.textContent = histOpen ? t('hist.close') : t('hist.view');
+  }
+  // Update hist-info if it still shows the prompt
+  const histInfo = document.getElementById('hist-info');
+  if (histInfo && histInfo.hasAttribute('data-i18n')) {
+    histInfo.textContent = t(histInfo.getAttribute('data-i18n'));
+  }
+}
+
+function updateChunksDiag() {
+  const el = document.getElementById('chunks-diag');
+  if (!el) return;
+  const n = el.getAttribute('data-chunks') || '—';
+  el.textContent = (n === '—') ? '—' : t('diag.chunks', parseInt(n).toLocaleString());
+}
+
+// ================================================================
+// Estado global
+// ================================================================
+let ws        = null;
+let wsAudio   = null;
+let audioCtx  = null;
+let gainNode  = null;
+let nextPlayTime  = 0;
+let audioActive   = false;
+let msgCount      = 0;
+
+// Message stores for language-switch re-render
+let storedMessages    = [];   // live feed, newest-first
+let lastHistoryEvents = [];   // last history query result
+
+const AUDIO_SR = 25000;   // Hz — debe coincidir con AUDIO_RATE en audio_monitor.py
+
+// Estado de controles (sincronizado con servidor via hello.controls)
+const ctrl = {
+  freq_mhz:        162.450,
+  gain:            40,
+  tuner_agc:       false,
+  volume:          0.8,
+  event_filter:    [],
+  integrations:    {
+    webhook: { enabled: false, url: '' }
+  }
+};
+
+// Event filter chip definitions
+const EVENT_CHIPS = [
+  { code: '',    label: 'ALL',   cls: 'all'  },
+  { code: 'EQW', label: 'EQW',   cls: 'eqw'  },
+  { code: 'EAN', label: 'EAN',   cls: 'other' },
+  { code: 'RWT', label: 'RWT',   cls: 'test' },
+  { code: 'RMT', label: 'RMT',   cls: 'test' },
+  { code: 'ADR', label: 'ADR',   cls: 'other' },
+];
+
+// Memorias de hardware localizadas
+let memory_usb = { device: 0, ppm: 0 };
+let memory_tcp = { host: '127.0.0.1', port: 1234, ppm: 0 };
+
+// ================================================================
+// Helpers de formato
+// ================================================================
+function fmtCountry(c) {
+  const cls = {MX:'mx', US:'us', CA:'ca'}[c] || 'other';
+  return `<span class="badge badge-${cls}">${c}</span>`;
+}
+function fmtEee(eee) {
+  const isEqw  = eee === 'EQW';
+  const isTest = ['RWT','RMT','NPT','DMO'].includes(eee);
+  const cls    = isEqw ? 'eqw' : isTest ? 'test' : 'other';
+  return `<span class="badge badge-${cls}">${eee}</span>`;
+}
+function fmtCallsign(msg) {
+  const cs = msg.LLLLLLLL || '—';
+  const tx = msg.transmitter;
+  const tip = (tx && tx.name && tx.name !== cs) ? tx.name : '';
+  return tip
+    ? `<span class="mono" title="${tip}">${cs}</span>`
+    : `<span class="mono">${cs}</span>`;
+}
+
+// Returns a translated, display-ready area name.
+// withState=true appends ", State" for normal named areas (used in the detail modal).
+// Handles special descriptive codes that must respond to language selection:
+//   - code 000000            → "Entire coverage area" / "Área de cobertura completa"
+//   - place "complete"       → "Estado (complete)" / "Estado (completo)"  [MX CCC=000]
+//   - place "all of {State}" → "All of State" / "Todo State"              [US CCC=000]
+function translateAreaPlace(a, withState = false) {
+  if (a.code === '000000')                        return t('area.allCoverage');
+  if (a.place === 'complete')                     return `${a.state} (${t('area.complete')})`;
+  if (a.place && /^all of /i.test(a.place))       return t('area.wholeState', a.state);
+  if (!a.place || a.place === a.code)             return a.code;
+  return withState ? `${a.place}, ${a.state}` : a.place;
+}
+
+function fmtAreas(msg) {
+  let areas = [];
+  if (msg.areas_decoded && msg.areas_decoded.length) {
+    areas = msg.areas_decoded.map(a => translateAreaPlace(a));
+  } else {
+    areas = msg.PSSCCC_list || [];
+  }
+  if (!areas.length) return `<span class="dim">—</span>`;
+  const title = areas.join('&#10;');
+  if (areas.length <= 2) {
+    return `<span title="${title}">${areas.join(', ')}</span>`;
+  }
+  return `<span title="${title}" style="cursor:help; border-bottom:1px dotted var(--text-dim)">${t('areas.affected', areas.length)}</span>`;
+}
+
+function fmtLength(msg) {
+  const secs = msg.seconds || 0;
+  if (!secs) return msg.length || '—';
+  const hh = Math.floor(secs / 3600);
+  const mm = Math.floor((secs % 3600) / 60);
+  if (currentLang === 'ES') {
+    const parts = [];
+    if (hh === 1) parts.push('1 hora');
+    else if (hh > 1) parts.push(`${hh} horas`);
+    if (mm === 1) parts.push('1 minuto');
+    else if (mm > 1) parts.push(`${mm} minutos`);
+    return parts.join(' ') || '—';
+  } else {
+    const parts = [];
+    if (hh === 1) parts.push('1 hour');
+    else if (hh > 1) parts.push(`${hh} hours`);
+    if (mm === 1) parts.push('1 minute');
+    else if (mm > 1) parts.push(`${mm} minutes`);
+    return parts.join(' ') || '—';
+  }
+}
+
+// ================================================================
+// Render: signal metrics
+// ================================================================
+function updateSignal(d) {
+  const lvlPct = Math.max(0, Math.min(100, (d.level_dbfs + 60) / 60 * 100));
+  document.getElementById('level-bar').style.width = lvlPct + '%';
+  document.getElementById('level-val').textContent = d.level_dbfs.toFixed(1) + ' dBFS';
+
+  const snrPct = Math.max(0, Math.min(100, d.snr_db / 40 * 100));
+  document.getElementById('snr-bar').style.width = snrPct + '%';
+  document.getElementById('snr-val').textContent = d.snr_db.toFixed(1) + ' dB';
+
+  document.getElementById('dev-val').textContent =
+    d.deviation !== undefined ? d.deviation.toFixed(3) : '—';
+}
+
+// ================================================================
+// Render: estado del receptor (pills del header)
+// ================================================================
+function updateStatus(d) {
+  document.getElementById('freq-val').textContent   = d.freq_mhz ? d.freq_mhz.toFixed(3) + ' MHz' : '—';
+  document.getElementById('gain-val').textContent   = d.gain   || '—';
+  document.getElementById('source-val').textContent = d.source || '—';
+  document.getElementById('uptime-val').textContent = d.uptime || '—';
+  
+  const cDiag = document.getElementById('chunks-diag');
+  if (cDiag) {
+    if (d.chunks !== undefined) {
+      cDiag.setAttribute('data-chunks', d.chunks);
+      cDiag.textContent = t('diag.chunks', d.chunks.toLocaleString());
+    }
+  }
+}
+
+// ================================================================
+// Modals Control
+// ================================================================
+
+function openHwModal() {
+  document.getElementById('hw-modal-overlay').classList.add('visible');
+}
+function closeHwModal(e) {
+  if (e && e.target !== document.getElementById('hw-modal-overlay')) return;
+  document.getElementById('hw-modal-overlay').classList.remove('visible');
+}
+
+
+function openRawModal(raw) {
+  if (!raw) return;
+  document.getElementById('modal-content').textContent = raw;
+  document.getElementById('modal-overlay').classList.add('visible');
+}
+
+function openRawModalFromState() {
+  // Reuse active alert message if exists
+  if (lastAlertMsg) {
+    openRawModal(lastAlertMsg.MESSAGE);
+  }
+}
+
+function closeRawModal(e) {
+  // Si se pasa evento, verificar que fue clic en el overlay (no en la card)
+  if (e && e.target !== document.getElementById('modal-overlay')) return;
+  document.getElementById('modal-overlay').classList.remove('visible');
+}
+
+// Escapar para cerrar modal
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeRawModal();
+});
+
+// ================================================================
+// Sistema de Notificaciones del Navegador
+// ================================================================
+
+function requestNotifications() {
+  if (!("Notification" in window)) {
+    showAlert(t('notif.noSupport'));
+    return;
+  }
+  Notification.requestPermission().then(permission => {
+    updateNotifUI(permission);
+    if (permission === "granted") {
+      new Notification("EAS-SAMEmon", { body: t('notif.success') });
+    }
+  });
+}
+
+function updateNotifUI(permission) {
+  const p = permission || (window.Notification ? Notification.permission : 'default');
+  const btn = document.getElementById('notif-btn');
+  const icon = document.getElementById('notif-icon');
+
+  if (!btn || !icon) return;
+
+  btn.classList.remove('active', 'denied');
+  if (p === 'granted') {
+    btn.classList.add('active');
+    icon.textContent = '🔔';
+    btn.title = t('notif.enabled');
+  } else if (p === 'denied') {
+    btn.classList.add('denied');
+    icon.textContent = '🔕';
+    btn.title = t('notif.blocked');
+  } else {
+    icon.textContent = '🔔';
+    btn.title = t('notif.enable');
+  }
+}
+
+function spawnBrowserNotification(msg) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  
+  const title = `🚨 ALERT: ${getEventName(msg)}`;
+  const body = fmtBroadcastTickerText(msg).trim();
+  
+  new Notification(title, {
+    body: body,
+    icon: '/static/favicon.ico', // Opcional si existiera
+    tag: 'eas-samemon-alert',
+    renotify: true,
+    requireInteraction: true // Mantiene la notificación hasta que el usuario la cierre (si el OS lo permite)
+  });
+}
+
+// ================================================================
+// Render: Active Alert and Broadcast Ticker
+// ================================================================
+
+function fmtBroadcastTickerText(msg) {
+  if (!msg) return '';
+
+  const org   = getOrgName(msg).toUpperCase();
+  const event = getEventName(msg).toUpperCase();
+
+  // Areas
+  let areasStr = '';
+  if (msg.areas_decoded && msg.areas_decoded.length) {
+    if (msg.areas_decoded.some(a => a.code === '000000')) {
+      areasStr = t('ticker.entireArea');
+    } else {
+      const names = msg.areas_decoded.map(a => translateAreaPlace(a));
+      if (names.length > 5) {
+        areasStr = `${names.slice(0, 5).join(', ').toUpperCase()} ${t('ticker.otherAreas', names.length - 5)}`;
+      } else {
+        areasStr = names.join(', ').toUpperCase();
+      }
+    }
+  } else {
+    areasStr = (msg.PSSCCC_list || []).join(', ').toUpperCase() || t('ticker.unspecified');
+  }
+
+  const locale = currentLang === 'ES' ? 'es-MX' : 'en-US';
+  const endTs = msg.end_dt
+    ? new Date(msg.end_dt).toLocaleTimeString(locale, {hour:'2-digit', minute:'2-digit'})
+    : '—';
+
+  const sender = msg.LLLLLLLL || 'SENDER';
+  return t('ticker.msg', sender, org, event, areasStr, endTs);
+}
+
+let lastAlertMsg = null;
+
+function updateAlert(active, msg) {
+  const card    = document.getElementById('alert-card');
+  const noAlert = document.getElementById('no-alert');
+  const body    = document.getElementById('alert-body');
+  const badge   = document.getElementById('alert-badge');
+
+  lastAlertMsg = active ? msg : null;
+
+  if (!active || !msg) {
+    card.className = 'card';
+    noAlert.style.display = 'flex';
+    body.className = 'alert-body';
+    return;
+  }
+  noAlert.style.display = 'none';
+  body.className = 'alert-body visible';
+
+  const eee    = msg.EEE || '';
+  const isEqw  = eee === 'EQW';
+  const isTest = ['RWT','RMT','NPT','DMO'].includes(eee);
+
+  card.className = 'card' + (isEqw ? ' active-eqw' : !isTest ? ' active-other' : '');
+  badge.className = 'alert-badge ' + (isEqw ? 'eqw' : isTest ? 'test' : 'other');
+  
+  // Detección de Acción Inmediata (Modo Extremo)
+  const immediateCodes = ['EQW', 'EVI', 'TOR', 'TSW', 'HUW', 'EAN', 'CAE', 'CEM', 'CDW', 'FRW'];
+  const isImmediate = immediateCodes.includes(eee);
+  
+  if (isImmediate) {
+    card.classList.add('alert-extreme');
+  }
+
+  document.getElementById('alert-eee').textContent   = eee;
+  document.getElementById('alert-event').textContent = getEventName(msg);
+
+  const tx    = msg.transmitter;
+  const txStr = tx && tx.name
+    ? `${tx.name}${tx.freq_mhz ? ' · ' + tx.freq_mhz + ' MHz' : ''}`
+    : msg.LLLLLLLL || '—';
+  let areasHtml;
+  if (msg.areas_decoded && msg.areas_decoded.length) {
+    areasHtml = msg.areas_decoded.map(a => {
+      const label = translateAreaPlace(a, true);
+      return `<span title="${a.code}">${label}</span>`;
+    }).join(' &bull; ');
+  } else {
+    areasHtml = (msg.PSSCCC_list || []).join(', ') || '—';
+  }
+
+  const locale = currentLang === 'ES' ? 'es-MX' : 'en-US';
+  const endTsAlert = msg.end_dt
+    ? new Date(msg.end_dt).toLocaleTimeString(locale, {hour:'2-digit', minute:'2-digit'})
+    : (msg.end || '—');
+
+  document.getElementById('alert-details').innerHTML =
+    `<strong>${t('alert.org')}:</strong> ${getOrgName(msg)}<br>` +
+    `<strong>${t('alert.country')}:</strong> ${msg.COUNTRY || '—'} &nbsp; <strong>${t('alert.areas')}:</strong> ${areasHtml}<br>` +
+    `<strong>${t('alert.callsign')}:</strong> ${txStr}<br>` +
+    `<strong>${t('alert.validUntil')}:</strong> ${endTsAlert} &nbsp; <strong>${t('alert.length')}:</strong> ${fmtLength(msg)}`;
+
+  // Update Ticker
+  const tickerWrap = document.getElementById('ticker-wrap');
+  const tickerText = document.getElementById('ticker-text');
+  
+  tickerText.textContent = fmtBroadcastTickerText(msg);
+  
+  // Clases de tema para el ticker
+  let tickerClass = 'card visible';
+  if (isEqw) tickerClass += ' ticker-eqw';
+  else if (isTest) tickerClass += ' ticker-test';
+  else tickerClass += ' ticker-other';
+  
+  tickerWrap.className = tickerClass;
+
+  // Si es una vulnerabilidad nueva (no un Hello al reconectar), lanzar notificación
+  // Usamos una marca de tiempo simple para evitar notificaciones duplicadas en re-renders
+  const now = Date.now();
+  if (isImmediate && (!lastNotifTime || now - lastNotifTime > 60000)) {
+    spawnBrowserNotification(msg);
+    lastNotifTime = now;
+  }
+}
+
+// ================================================================
+// Home Assistant Integrations
+// ================================================================
+
+function openHaModal() {
+  // Sync form with current state before opening
+  updateIntegrationsUI(ctrl.integrations);
+  document.getElementById('ha-modal-overlay').classList.add('visible');
+}
+
+function closeHaModal(e) {
+  if (e && e.target !== document.getElementById('ha-modal-overlay')) return;
+  document.getElementById('ha-modal-overlay').classList.remove('visible');
+}
+
+function openWebhookHelp() {
+  const isEs = currentLang === 'ES';
+  document.getElementById('webhook-help-en').style.display = isEs ? 'none' : '';
+  document.getElementById('webhook-help-es').style.display = isEs ? '' : 'none';
+  document.getElementById('webhook-help-overlay').classList.add('visible');
+}
+function closeWebhookHelp(e) {
+  if (e && e.target !== document.getElementById('webhook-help-overlay')) return;
+  document.getElementById('webhook-help-overlay').classList.remove('visible');
+}
+
+function saveHaSettingsFromModal() {
+  const data = {
+    webhook: {
+      enabled: document.getElementById('modal-webhook-enable').checked,
+      url:     document.getElementById('modal-webhook-url').value.trim() || '',
+    },
+  };
+
+  ctrl.integrations = data;
+  sendCtrl('set_integrations', data);
+
+  // Show inline feedback
+  const btn = document.getElementById('ha-save-btn');
+  const status = document.getElementById('ha-status-msg');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = t('hw.saving');
+  status.style.display = 'none';
+
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = origText;
+    status.style.display = 'block';
+    status.style.background = 'var(--green, #238636)22';
+    status.style.color = 'var(--green, #3fb950)';
+    status.style.border = '1px solid var(--green, #238636)55';
+    status.textContent = t('ha.saved');
+  }, 600);
+}
+
+function updateIntegrationsUI(data) {
+  if (!data) return;
+  ctrl.integrations = data;
+
+  const web = data.webhook || {};
+
+  const wE = document.getElementById('modal-webhook-enable');
+  if (wE) wE.checked = !!web.enabled;
+
+  const wU = document.getElementById('modal-webhook-url');
+  if (wU) wU.value = web.url || '';
+
+  // Hide status message when modal is re-synced
+  const status = document.getElementById('ha-status-msg');
+  if (status) status.style.display = 'none';
+}
+
+let lastNotifTime = 0;
+
+// ================================================================
+// Render: fila de mensaje
+// ================================================================
+function addMessageRow(msg, flash) {
+  const tbody = document.getElementById('msg-body');
+  const noMsg = document.getElementById('no-messages');
+  if (noMsg) noMsg.closest('tr').remove();
+
+  const locale = currentLang === 'ES' ? 'es-MX' : 'en-US';
+  const ts = msg.received_at
+    ? new Date(msg.received_at).toLocaleString(locale,
+        {day:'2-digit', month:'2-digit', year:'numeric',
+         hour:'2-digit', minute:'2-digit', second:'2-digit'})
+    : '—';
+
+  const endTs = msg.end_dt
+    ? new Date(msg.end_dt).toLocaleTimeString(locale, {hour:'2-digit', minute:'2-digit'})
+    : (msg.end || '—');
+
+  const tr = document.createElement('tr');
+  if (flash) tr.className = 'flash';
+  tr.setAttribute('data-eee', msg.EEE || '');
+  tr.setAttribute('data-ts', msg.received_at || '');
+  if (msg.end_dt) tr.setAttribute('data-end-dt', msg.end_dt);
+
+  const active = ctrl.event_filter || [];
+  if (active.length > 0 && !active.includes(msg.EEE)) {
+    tr.style.display = 'none';
+  }
+
+  tr.onclick = () => openRawModal(msg.MESSAGE);
+
+  tr.innerHTML =
+    `<td class="mono dim">${ts}</td>` +
+    `<td>${fmtEee(msg.EEE || '—')}</td>` +
+    `<td>${getEventName(msg)}</td>` +
+    `<td>${fmtCountry(msg.COUNTRY || '—')}</td>` +
+    `<td class="dim">${getOrgName(msg)}</td>` +
+    `<td>${fmtAreas(msg)}</td>` +
+    `<td>${fmtCallsign(msg)}</td>` +
+    `<td class="dim">${fmtLength(msg)}</td>` +
+    `<td class="dim">${endTs}</td>` +
+    `<td style="text-align:right; white-space:nowrap">
+      <input type="checkbox" class="del-checkbox" value="${msg.received_at}" onclick="event.stopPropagation()" style="margin-right:4px">
+      <button class="btn-del small" onclick="deleteOne('${msg.received_at}', event)" title="Delete this message">🗑️</button>
+    </td>`;
+  tbody.insertBefore(tr, tbody.firstChild);
+
+  msgCount++;
+  document.getElementById('msg-count').textContent = t('msg.count', msgCount);
+}
+
+// ================================================================
+// Render: entrada de log
+// ================================================================
+function addLogEntry(entry, prepend) {
+  const feed = document.getElementById('log-feed');
+  const div  = document.createElement('div');
+  div.className = 'log-entry';
+  const locale = currentLang === 'ES' ? 'es-MX' : 'en-US';
+  const timeStr = entry.time
+    ? new Date(entry.time).toLocaleTimeString(locale,
+        {hour:'2-digit', minute:'2-digit', second:'2-digit'})
+    : '';
+
+  div.innerHTML =
+    `<span class="log-time">${timeStr}</span>` +
+    `<span class="log-text ${entry.level || 'info'}">${entry.text || ''}</span>`;
+  prepend ? feed.insertBefore(div, feed.firstChild) : feed.appendChild(div);
+  while (feed.children.length > 120) feed.removeChild(feed.lastChild);
+}
+
+// ================================================================
+// Controles — inicializar desde hello.controls
+// ================================================================
+function initControls(c) {
+  if (!c) return;
+  Object.assign(ctrl, c);
+
+  const freq_el = document.getElementById('freq-input');
+  const freq_str = (c.freq_mhz || 162.400).toFixed(3);
+  if (![...freq_el.options].some(o => o.value === freq_str)) {
+    const opt = document.createElement('option');
+    opt.value = freq_str;
+    opt.textContent = `Custom - ${freq_str} MHz`;
+    freq_el.appendChild(opt);
+  }
+  freq_el.value = freq_str;
+  
+  const gain_input = document.getElementById('gain-input');
+  const gain_label = document.getElementById('gain-val-label');
+  const agc_toggle = document.getElementById('agc-toggle');
+  
+  const gVal = (c.gain === 'auto') ? 0 : (c.gain || 0);
+  gain_input.value = gVal;
+  gain_label.textContent = parseFloat(gVal).toFixed(1) + ' dB';
+  agc_toggle.checked = !!c.tuner_agc;
+  
+  // Interlock logic for Slider
+  const isAgc = !!agc_toggle.checked;
+  gain_input.disabled = isAgc;
+  gain_input.style.opacity = isAgc ? '0.5' : '1';
+  gain_label.style.visibility = isAgc ? 'hidden' : 'visible';
+
+  if (c.hw_usb) memory_usb = Object.assign({}, c.hw_usb);
+  if (c.hw_tcp) memory_tcp = Object.assign({}, c.hw_tcp);
+
+  if (c.hardware) {
+    document.getElementById('hw-mode-input').value = c.hardware.mode || 'TCP';
+    document.getElementById('ppm-input').value = (c.ppm !== undefined) ? c.ppm : 0;
+    if (c.hardware.mode === 'USB') {
+      document.getElementById('hw-device-input').value = c.hardware.device || 0;
+    } else {
+      document.getElementById('hw-host-input').value = c.hardware.host || '';
+      document.getElementById('hw-port-input').value = c.hardware.port || 1234;
+    }
+    toggleHwModeUI(true); // silent=true to not overwrite memories with the initial toggle
+  }
+
+  const vol = c.volume !== undefined ? c.volume : 0.8;
+  document.getElementById('vol-slider').value = vol;
+  document.getElementById('vol-val').textContent = Math.round(vol * 100) + '%';
+  if (gainNode) gainNode.gain.value = vol;
+
+  renderEventChips(c.event_filter || []);
+}
+
+// ── Event filter chips ────────────────────────────────────────────
+function applyViewFilter() {
+  const active = ctrl.event_filter || [];
+  
+  const filterRows = (selector) => {
+    document.querySelectorAll(selector).forEach(tr => {
+      const eee = tr.getAttribute('data-eee');
+      if (!eee) return;
+      if (active.length === 0 || active.includes(eee)) {
+        tr.style.display = '';
+      } else {
+        tr.style.display = 'none';
+      }
+    });
+  };
+
+  filterRows('#msg-body tr[data-eee]');
+  filterRows('#hist-body tr[data-eee]');
+}
+
+function renderEventChips(active) {
+  const container = document.getElementById('event-chips');
+  container.innerHTML = '';
+  EVENT_CHIPS.forEach(({ code, label, cls }) => {
+    const isTodos  = code === '';
+    const isActive = isTodos ? active.length === 0 : active.includes(code);
+    const span = document.createElement('span');
+    span.className = 'chip' + (isActive ? ` on-${cls}` : '');
+    span.textContent = label;
+    span.onclick = () => {
+      if (isTodos) {
+        ctrl.event_filter = [];
+      } else {
+        const idx = ctrl.event_filter.indexOf(code);
+        if (idx >= 0) ctrl.event_filter.splice(idx, 1);
+        else ctrl.event_filter.push(code);
+      }
+      sendCtrl('set_event_filter', ctrl.event_filter);
+      renderEventChips(ctrl.event_filter);
+    };
+    container.appendChild(span);
+  });
+  applyViewFilter();
+}
+
+// ── Aplicar controles ─────────────────────────────────────────────
+function applyFreq() {
+  const v = parseFloat(document.getElementById('freq-input').value);
+  if (isNaN(v) || v < 24 || v > 1766) return;
+  ctrl.freq_mhz = v;
+  sendCtrl('set_freq', v);
+}
+
+
+function onGainSlider(val) {
+  const v = parseFloat(val);
+  document.getElementById('gain-val-label').textContent = v.toFixed(1) + ' dB';
+  ctrl.gain = v;
+  sendCtrl('set_gain', v);
+}
+
+function setTunerAgc(enabled) {
+  ctrl.tuner_agc = enabled;
+  const input = document.getElementById('gain-input');
+  const label = document.getElementById('gain-val-label');
+  
+  input.disabled = enabled;
+  input.style.opacity = enabled ? '0.5' : '1';
+  label.style.visibility = enabled ? 'hidden' : 'visible';
+  
+  sendCtrl('set_tuner_agc', enabled);
+}
+function onVolume(v) {
+  const val = parseFloat(v);
+  ctrl.volume = val;
+  document.getElementById('vol-val').textContent = Math.round(val * 100) + '%';
+  if (gainNode) gainNode.gain.value = val;
+  sendCtrl('set_volume', val);
+}
+
+function applyPpm() {
+  const v = document.getElementById('ppm-input').value;
+  if (v !== '') sendCtrl('set_ppm', parseInt(v));
+}
+
+
+function toggleHwModeUI(silent=false) {
+  const mode = document.getElementById('hw-mode-input').value;
+  document.getElementById('hw-device-grp').style.display = (mode === 'USB') ? 'block' : 'none';
+  document.getElementById('hw-tcp-grp').style.display = (mode === 'TCP') ? 'block' : 'none';
+
+  if (!silent) {
+    // Restaurar valores de la memoria correspondiente si el usuario cambia el select
+    if (mode === 'USB') {
+      document.getElementById('hw-device-input').value = memory_usb.device || 0;
+      document.getElementById('ppm-input').value = memory_usb.ppm || 0;
+    } else {
+      document.getElementById('hw-host-input').value = memory_tcp.host || '127.0.0.1';
+      document.getElementById('hw-port-input').value = memory_tcp.port || 1234;
+      document.getElementById('ppm-input').value = memory_tcp.ppm || 0;
+    }
+  }
+}
+
+async function applyHardware() {
+  const btn = document.querySelector('#hw-modal-overlay .btn-apply');
+  const oldText = btn ? btn.textContent : '';
+  
+  const mode = document.getElementById('hw-mode-input').value;
+  const ppm  = parseInt(document.getElementById('ppm-input').value) || 0;
+  const hw = { mode: mode, ppm: ppm };
+  
+  if (mode === 'USB') {
+    hw.device = parseInt(document.getElementById('hw-device-input').value) || 0;
+    memory_usb = Object.assign({}, hw);
+  } else {
+    hw.host = document.getElementById('hw-host-input').value || '127.0.0.1';
+    hw.port = parseInt(document.getElementById('hw-port-input').value) || 1234;
+    memory_tcp = Object.assign({}, hw);
+  }
+  
+  try {
+    btn.textContent = t('hw.saving');
+    btn.disabled = true;
+
+    const res = await fetch('/api/hardware', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(hw)
+    });
+
+    if (!res.ok) throw new Error(t('err.server'));
+
+    btn.textContent = t('hw.saved');
+    setTimeout(() => {
+      btn.textContent = oldText;
+      btn.disabled = false;
+    }, 1500);
+
+  } catch (err) {
+    alert(t('err.hwSave', err.message));
+    btn.textContent = oldText;
+    btn.disabled = false;
+  }
+}
+
+// Submit on Enter in inputs (receiver)
+document.addEventListener('DOMContentLoaded', () => {
+  // Freq input is now a select handled by onchange
+  renderEventChips([]);
+  // Enter en inputs de historial (se añaden en el bloque de historia)
+  ['hist-from', 'hist-to'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') loadHistory(); });
+  });
+});
+
+// ================================================================
+// WebSocket de control
+// ================================================================
+function sendCtrl(type, value) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type, value }));
+  }
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('conn-dot').className   = 'ok';
+    document.getElementById('conn-label').textContent = t('conn.connected');
+  };
+  ws.onclose = () => {
+    document.getElementById('conn-dot').className   = '';
+    document.getElementById('conn-label').textContent = t('conn.reconnecting');
+    setTimeout(connect, 2500);
+  };
+  ws.onerror = () => ws.close();
+
+  ws.onmessage = (evt) => {
+    let env;
+    try { env = JSON.parse(evt.data); } catch { return; }
+    const { type, data } = env;
+
+    switch (type) {
+      case 'hello':
+        if (data.status)   updateStatus(data.status);
+        if (data.alert)    updateAlert(data.alert.active, data.alert.message);
+        if (data.messages) {
+          storedMessages = [...data.messages]; // newest-first, mirrors server deque
+          [...data.messages].reverse().forEach(m => addMessageRow(m, false));
+        }
+        if (data.logs)     [...data.logs].reverse().forEach(l => addLogEntry(l, false));
+        if (data.controls) {
+          updateControlsUI(data.controls);
+          if (data.controls.integrations) {
+            updateIntegrationsUI(data.controls.integrations);
+          }
+        }
+        break;
+      case 'status':
+        updateStatus(data);
+        break;
+      case 'metrics':
+        updateSignal(data);
+        break;
+      case 'message':
+        storedMessages.unshift(data); // keep newest-first
+        if (storedMessages.length > 200) storedMessages.pop();
+        addMessageRow(data, true);
+        break;
+      case 'alert':
+        updateAlert(data.active, data.message);
+        break;
+      case 'log':
+        addLogEntry(data, true);
+        break;
+      case 'controls':
+        initControls(data);
+        break;
+      case 'delete_event':
+        if (data && data.received_at) {
+          // Remove from in-memory store so reRenderLive() doesn't resurrect it
+          storedMessages = storedMessages.filter(m => m.received_at !== data.received_at);
+          document.querySelectorAll(`tr[data-ts="${data.received_at}"]`).forEach(tr => {
+            tr.style.transition = "opacity 0.3s ease-out";
+            tr.style.opacity = "0";
+            setTimeout(() => tr.remove(), 300);
+          });
+        }
+        break;
+    }
+  };
+}
+
+// ================================================================
+// Audio streaming — Web Audio API + WebSocket binario
+// ================================================================
+function toggleAudio() {
+  audioActive ? stopAudio() : startAudio();
+}
+
+function startAudio() {
+  audioActive = true;
+  setAudioUI('buffering');
+
+  // AudioContext requiere gesto del usuario — ya estamos en un onclick
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_SR });
+  gainNode = audioCtx.createGain();
+  gainNode.gain.value = ctrl.volume;
+  gainNode.connect(audioCtx.destination);
+  nextPlayTime = 0;
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  wsAudio = new WebSocket(`${proto}://${location.host}/ws/audio`);
+  wsAudio.binaryType = 'arraybuffer';
+
+  wsAudio.onopen  = () => setAudioUI('on');
+  wsAudio.onerror = () => wsAudio && wsAudio.close();
+  wsAudio.onclose = () => {
+    if (audioActive) {
+      setAudioUI('buffering');
+      setTimeout(startAudio, 2500);
+    }
+  };
+
+  wsAudio.onmessage = (e) => {
+    if (!audioCtx) return;
+    const f32 = new Float32Array(e.data);
+    const buf = audioCtx.createBuffer(1, f32.length, AUDIO_SR);
+    buf.copyToChannel(f32, 0);
+
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(gainNode);
+
+    // Mantener ~80 ms de buffer adelante para absorber jitter de red
+    const now = audioCtx.currentTime;
+    if (nextPlayTime < now + 0.04) nextPlayTime = now + 0.08;
+    src.start(nextPlayTime);
+    nextPlayTime += buf.duration;
+  };
+}
+
+function stopAudio() {
+  audioActive = false;
+  if (wsAudio) { wsAudio.onclose = null; wsAudio.close(); wsAudio = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; gainNode = null; }
+  nextPlayTime = 0;
+  setAudioUI('off');
+}
+
+function setAudioUI(state) {
+  const btn = document.getElementById('audio-btn');
+  const lbl = document.getElementById('audio-status');
+  if (state === 'on') {
+    btn.textContent = t('audio.stop');
+    btn.className   = 'btn-play stop';
+    lbl.textContent = t('audio.playing');
+    lbl.className   = 'audio-status on';
+  } else if (state === 'buffering') {
+    btn.textContent = t('audio.stop');
+    btn.className   = 'btn-play stop';
+    lbl.textContent = t('audio.connecting');
+    lbl.className   = 'audio-status buffering';
+  } else {
+    btn.textContent = t('audio.listen');
+    btn.className   = 'btn-play';
+    lbl.textContent = t('audio.disconnected');
+    lbl.className   = 'audio-status';
+  }
+}
+
+function reRenderLive() {
+  const tbody = document.getElementById('msg-body');
+  tbody.innerHTML = '';
+  msgCount = 0;
+  // storedMessages is newest-first; addMessageRow inserts at top,
+  // so iterate oldest-first to preserve newest-at-top order.
+  [...storedMessages].reverse().forEach(m => addMessageRow(m, false));
+}
+
+// ================================================================
+// Historial de eventos
+// ================================================================
+function toggleHistory() {
+  const body     = document.getElementById('history-body');
+  const btn      = document.getElementById('hist-toggle-btn');
+  const titleRow = document.getElementById('hist-title-row');
+  
+  // Use getComputedStyle to correctly detect the initial state defined in CSS
+  const isOpen = window.getComputedStyle(body).display !== 'none';
+
+  if (isOpen) {
+    body.style.display = 'none';
+    btn.textContent    = t('hist.view');
+    btn.classList.remove('open');
+    titleRow.classList.remove('expanded');
+  } else {
+    body.style.display = 'block';
+    btn.textContent    = t('hist.close');
+    btn.classList.add('open');
+    titleRow.classList.add('expanded');
+
+    // Prefill dates only the first time: last month range by default
+    if (!document.getElementById('hist-from').value) {
+      const to   = new Date();
+      const from = new Date();
+      from.setDate(from.getDate() - 30);
+      document.getElementById('hist-to').value   = to.toISOString().split('T')[0];
+      document.getElementById('hist-from').value = from.toISOString().split('T')[0];
+    }
+  }
+}
+
+async function loadHistory() {
+  const from = document.getElementById('hist-from').value;
+  const to   = document.getElementById('hist-to').value;
+  const info = document.getElementById('hist-info');
+  const wrap = document.getElementById('hist-table-wrap');
+
+  if (!from || !to) {
+    info.textContent = t('err.dateRange');
+    info.className   = 'hist-info error';
+    return;
+  }
+  if (from > to) {
+    info.textContent = t('err.dateOrder');
+    info.className   = 'hist-info error';
+    return;
+  }
+
+  info.textContent = t('hist.searching');
+  info.className   = 'hist-info loading';
+  wrap.style.display = 'none';
+
+  try {
+    const url  = `/api/events?from_date=${from}&to_date=${to}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const events = await resp.json();
+
+    renderHistoryTable(events);
+
+    if (events.length === 0) {
+      info.textContent = t('hist.noEvents');
+      info.className   = 'hist-info empty';
+    } else {
+      const locale = currentLang === 'ES' ? 'es-MX' : 'en-US';
+      const fmtDate = (s) =>
+        new Date(s + 'T00:00:00').toLocaleDateString(locale,
+          {day:'2-digit', month:'2-digit', year:'numeric'});
+      const n = events.length;
+      info.textContent = t('events.n', n, fmtDate(from), fmtDate(to));
+      info.className   = 'hist-info results';
+      wrap.style.display = 'block';
+    }
+  } catch (e) {
+    info.textContent = `Error: ${e.message}`;
+    info.className   = 'hist-info error';
+  }
+}
+
+function renderHistoryTable(events) {
+  lastHistoryEvents = events; // cache for language-switch re-render
+  const tbody = document.getElementById('hist-body');
+  tbody.innerHTML = '';
+
+  events.forEach(msg => {
+    const locale = currentLang === 'ES' ? 'es-MX' : 'en-US';
+    const ts = msg.received_at
+      ? new Date(msg.received_at).toLocaleString(locale, {
+          day:'2-digit', month:'2-digit', year:'numeric',
+          hour:'2-digit', minute:'2-digit', second:'2-digit'
+        })
+      : '—';
+
+    const tx    = msg.transmitter;
+    const txStr = (tx && tx.name && tx.name !== msg.LLLLLLLL)
+      ? `${tx.name}${tx.freq_mhz ? ' · ' + tx.freq_mhz + ' MHz' : ''}`
+      : (msg.LLLLLLLL || '—');
+
+    const active = ctrl.event_filter || [];
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-eee', msg.EEE || '');
+    tr.setAttribute('data-ts', msg.received_at || '');
+    if (active.length > 0 && !active.includes(msg.EEE)) {
+      tr.style.display = 'none';
+    }
+
+    tr.onclick = () => openRawModal(msg.MESSAGE);
+
+    // chCellH removed
+
+    const endTs = msg.end_dt
+      ? new Date(msg.end_dt).toLocaleTimeString(locale, {hour:'2-digit', minute:'2-digit'})
+      : (msg.end || '—');
+
+    tr.innerHTML =
+      `<td class="mono dim" style="white-space:nowrap">${ts}</td>` +
+      `<td>${fmtEee(msg.EEE || '—')}</td>` +
+      `<td>${getEventName(msg)}</td>` +
+      `<td>${fmtCountry(msg.COUNTRY || '—')}</td>` +
+      `<td class="dim">${getOrgName(msg)}</td>` +
+      `<td>${fmtAreas(msg)}</td>` +
+      `<td class="dim mono" style="font-size:11px">${txStr}</td>` +
+      `<td class="dim">${fmtLength(msg)}</td>` +
+      `<td class="dim">${endTs}</td>` +
+      `<td style="text-align:right; white-space:nowrap">
+        <input type="checkbox" class="del-checkbox" value="${msg.received_at}" onclick="event.stopPropagation()" style="margin-right:4px">
+        <button class="btn-del small" onclick="deleteOne('${msg.received_at}', event)" title="Delete this message">🗑️</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// ================================================================
+// Acciones (DELETE)
+// ================================================================
+// ================================================================
+// In-page confirm / alert modal (replaces browser confirm/alert)
+// ================================================================
+let _confirmResolve = null;
+
+function _showModal(message, title, okLabel, showCancel) {
+  document.getElementById('confirm-modal-title').textContent   = title;
+  document.getElementById('confirm-modal-message').textContent = message;
+  document.getElementById('confirm-modal-ok').textContent      = okLabel;
+  document.getElementById('confirm-modal-cancel').style.display = showCancel ? '' : 'none';
+  document.getElementById('confirm-modal-overlay').classList.add('visible');
+  return new Promise(resolve => { _confirmResolve = resolve; });
+}
+
+function _confirmModalResolve(result) {
+  document.getElementById('confirm-modal-overlay').classList.remove('visible');
+  if (_confirmResolve) { _confirmResolve(result); _confirmResolve = null; }
+}
+
+function _confirmModalBackdrop(e) {
+  if (e.target === document.getElementById('confirm-modal-overlay')) _confirmModalResolve(false);
+}
+
+function showConfirm(message, title) {
+  return _showModal(message, title || t('del.title'), t('modal.ok'), true);
+}
+
+function showAlert(message, title) {
+  return _showModal(message, title || 'Info', t('modal.ok'), false);
+}
+
+// ================================================================
+// Delete actions
+// ================================================================
+async function deleteSelected(tbodyId) {
+  const checkboxes = document.querySelectorAll(`#${tbodyId} .del-checkbox:checked`);
+  if (checkboxes.length === 0) {
+    await showAlert(t('del.selectFirst'));
+    return;
+  }
+  const confirmed = await showConfirm(t('del.confirm', checkboxes.length));
+  if (!confirmed) return;
+
+  const timestamps = Array.from(checkboxes).map(cb => cb.value);
+  await apiDeleteMany(timestamps);
+}
+
+async function apiDeleteMany(timestamps) {
+  if (!timestamps || !timestamps.length) return;
+  try {
+    const res = await fetch('/api/events', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timestamps }),
+    });
+    if (!res.ok) console.error('Bulk delete error', res.status);
+  } catch (err) {
+    console.error('Network error on bulk delete', err.message);
+  }
+}
+
+async function deleteOne(ts, event) {
+  if (event) event.stopPropagation();
+  const confirmed = await showConfirm(t('del.confirmOne'));
+  if (!confirmed) return;
+  await apiDelete(ts);
+}
+
+async function apiDelete(ts) {
+  if (!ts) return;
+  try {
+    const res = await fetch('/api/events/' + encodeURIComponent(ts), { method: 'DELETE' });
+    if (!res.ok) {
+      console.error("Error deleting", ts, res.status);
+    }
+  } catch (err) {
+    console.error('Network error deleting', ts, err.message);
+  }
+}
+
+function toggleAllCheckboxes(masterCheckbox, tbodyId) {
+  const checkboxes = document.querySelectorAll(`#${tbodyId} .del-checkbox`);
+  for (const cb of checkboxes) {
+    const tr = cb.closest('tr');
+    if (tr && tr.style.display !== 'none') {
+      cb.checked = masterCheckbox.checked;
+    }
+  }
+}
+
+// ================================================================
+// Init
+// ================================================================
+document.addEventListener('DOMContentLoaded', () => {
+  // Apply saved language preference
+  document.getElementById('lang-select').value = currentLang;
+  applyTranslations();
+  updateNotifUI();
+});
+connect();
+
+// ================================================================
+// Auto-purge: remove live feed rows once their purge time expires
+// ================================================================
+function _purgeExpiredRows() {
+  const now = Date.now();
+  document.querySelectorAll('#msg-body tr[data-end-dt]').forEach(tr => {
+    const endDt = tr.getAttribute('data-end-dt');
+    if (!endDt) return;
+    if (now >= new Date(endDt).getTime()) {
+      tr.style.transition = 'opacity 0.6s ease-out';
+      tr.style.opacity = '0';
+      setTimeout(() => {
+        if (tr.parentNode) {
+          tr.remove();
+          msgCount = Math.max(0, msgCount - 1);
+          const el = document.getElementById('msg-count');
+          if (el) el.textContent = t('msg.count', msgCount);
+        }
+      }, 650);
+    }
+  });
+}
+setInterval(_purgeExpiredRows, 15000);
+</script>
+</body>
+</html>

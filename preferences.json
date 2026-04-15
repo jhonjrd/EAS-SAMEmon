@@ -1,0 +1,29 @@
+{
+  "hardware": {
+    "mode": "TCP",
+    "host": "127.0.0.1",
+    "port": 1234
+  },
+  "freq_mhz": 162.4,
+  "gain": 0.0,
+  "squelch_enabled": false,
+  "squelch": -20.0,
+  "ppm": 0,
+  "volume": 0.5,
+  "multi_channel": false,
+  "tuner_agc": true,
+  "event_filter": [],
+  "lang": "EN",
+  "hardware_usb": {
+    "mode": "USB",
+    "ppm": 0,
+    "device": 0
+  },
+  "hardware_tcp": {
+    "mode": "TCP",
+    "ppm": 0,
+    "host": "127.0.0.1",
+    "port": 1234
+  },
+  "hardware_last_mode": "TCP"
+}

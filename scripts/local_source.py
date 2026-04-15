@@ -1,0 +1,343 @@
+"""
+local_source.py — IQ Source from local USB RTL-SDR
+
+Uses pyrtlsdr (librtlsdr wrapper) to read IQ samples directly
+from the USB-connected RTL-SDR dongle, without needing rtl_tcp or any
+external process.
+
+Requirements:
+    pip install pyrtlsdr
+    + librtlsdr.dll in PATH (included with SDR# driver package
+      or the rtl-sdr-blog release pack)
+
+Driver Installation (Windows):
+    1. Download https://github.com/rtlsdrblog/rtl-sdr-blog/releases
+       → extract rtl_sdr.dll / librtlsdr.dll to project directory
+         or to C:\\Windows\\System32
+    2. Connect dongle and use Zadig to install WinUSB
+
+Public Interface — same as RtlTcpSource:
+    src = PyRtlSdrSource(device_index=0, freq=162_450_000, ...)
+    src.start(iq_queue)
+    ...
+    src.stop()
+"""
+
+import queue
+import threading
+import logging
+import time
+import numpy as np
+
+log = logging.getLogger(__name__)
+
+# Complex samples per chunk read from dongle
+# 16,384 complex → 32,768 uint8 → ~65 ms @ 250 kHz
+CHUNK_SAMPLES = 16_384
+
+
+class PyRtlSdrSource:
+    """
+    Reads IQ samples from local USB RTL-SDR using pyrtlsdr.
+
+    Parameters
+    ----------
+    device_index : int
+        Dongle index (0 if only one connected).
+    freq : int
+        Center frequency in Hz (e.g., 162_450_000).
+    sample_rate : int
+        Sample rate in Hz (e.g., 250_000).
+    gain : float
+        Gain in dB. 0.0 = Automatic Tuner AGC.
+    ppm : int
+        Frequency error correction in ppm.
+    tuner_agc : bool
+        If True, activates tuner AGC (same as gain=0).
+    rtl_agc : bool
+        If True, activates internal RTL2832U digital AGC.
+    """
+
+    def __init__(self,
+                 device_index: int = 0,
+                 freq:         int   = 162_450_000,
+                 sample_rate:  int   = 250_000,
+                 gain:         float = 40.0,
+                 ppm:          int   = 0,
+                 tuner_agc:    bool  = False,
+                 rtl_agc:      bool  = False):
+        self.device_index = device_index
+        self.freq         = freq
+        self.sample_rate  = sample_rate
+        self.gain         = gain
+        self.ppm          = ppm
+        self.tuner_agc    = tuner_agc
+        self.rtl_agc      = rtl_agc
+
+        self._sdr     = None
+        self._thread  = None
+        self._running = False
+
+    # ------------------------------------------------------------------
+    # Control
+    # ------------------------------------------------------------------
+
+    def start(self, iq_queue: queue.Queue):
+        """Open dongle and start reading IQ in a background thread."""
+        try:
+            from rtlsdr import RtlSdr
+        except ImportError as e:
+            import platform
+            is_linux = platform.system() == 'Linux'
+            
+            # Try to diagnose if it's the package, system library, or setuptools issue
+            msg_extra = ""
+            try:
+                import rtlsdr
+                pkg_installed = True
+            except ImportError as ie:
+                pkg_installed = False
+                # Capture specific pkg_resources error (common in Python 3.12+)
+                if "pkg_resources" in str(ie) or "ModuleNotFoundError" in str(ie):
+                    msg_extra = ("\n[DEPENDENCY ERROR] Missing 'setuptools'. Legacy pyrtlsdr versions require 'pkg_resources'.\n"
+                                 "  → Solution: pip install setuptools\n")
+
+            if msg_extra:
+                msg = msg_extra
+            elif not pkg_installed:
+                msg = ("\n[ERROR] The 'pyrtlsdr' package is not installed in this Python environment.\n"
+                       "  → Command: pip install pyrtlsdr==0.2.93\n")
+            else:
+                if is_linux:
+                    msg = ("\n[ERROR] 'pyrtlsdr' package was found, but system library 'librtlsdr.so' could not be loaded.\n"
+                           "  → Cause: Base driver is not installed or not accessible.\n"
+                           "  → Solution: Ask administrator to install 'librtlsdr-dev' or 'librtlsdr0'.\n"
+                           "  → Additional diagnostics: python3 -c \"import ctypes; print(ctypes.util.find_library('rtlsdr'))\"\n")
+                else:
+                    msg = ("\n[ERROR] 'librtlsdr.dll' library is missing from PATH or project directory.\n"
+                           "  → Solution: Download drivers from rtl-sdr.blog and copy .dll here.\n")
+            
+            raise ImportError(msg) from e
+
+        try:
+            self._sdr = RtlSdr(device_index=self.device_index)
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "undefined symbol" in err_msg or "rtlsdr_set_dithering" in err_msg or "entry point" in err_msg or "procedure not found" in err_msg:
+                raise RuntimeError(
+                    "\n[COMPATIBILITY ERROR] Your librtlsdr driver is too old for this pyrtlsdr version.\n"
+                    "  → Cause: System library lacks 'rtlsdr_set_dithering'.\n"
+                    "  → Solution (Managed Linux): Ensure you use pyrtlsdr==0.2.93 in your venv.\n"
+                    "  → Command: pip install pyrtlsdr==0.2.93\n"
+                ) from e
+            raise e
+
+        # Configure dongle
+        self._sdr.sample_rate  = self.sample_rate
+        self._sdr.center_freq  = self.freq
+        
+        if self.ppm != 0:
+            try:
+                self._sdr.freq_correction = self.ppm
+            except Exception as e:
+                log.warning(f"Could not configure freq_correction ({self.ppm} PPM): {e}")
+        else:
+            log.info("PPM is 0, skipping freq_correction config (stability)")
+
+        # Gain / Tuner AGC
+        if self.tuner_agc or self.gain == 0:
+            self._sdr.gain = 'auto'
+            log.info('Tuner AGC: ON (automatic)')
+        else:
+            self._sdr.gain = self.gain
+            log.info(f'Tuner AGC: OFF manual gain = {self.gain} dB')
+
+        # RTL AGC (internal digital RTL2832U)
+        # Some legacy drivers fail here too
+        try:
+            self._sdr.set_agc_mode(1 if self.rtl_agc else 0)
+        except Exception:
+            log.warning("Could not configure RTL AGC (possible driver incompatibility)")
+
+        log.info(f'RTL AGC: {"ON" if self.rtl_agc else "OFF"}')
+
+        gain_str = ('auto/Tuner-AGC' if (self.tuner_agc or self.gain == 0)
+                    else f'{self.gain} dB')
+        rtl_str  = 'RTL-AGC=ON' if self.rtl_agc else 'RTL-AGC=OFF'
+        log.info(
+            f'PyRtlSdrSource started — device [{self.device_index}]  '
+            f'freq={self.freq/1e6:.3f} MHz  sr={self.sample_rate:,} Hz  '
+            f'gain={gain_str}  {rtl_str}'
+        )
+
+        self._queue   = iq_queue
+        self._running = True
+        self._thread  = threading.Thread(target=self._reader_loop,
+                                         name='pyrtlsdr-reader', daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        """Stop reading and close the dongle."""
+        self._running = False
+        if self._sdr:
+            try:
+                self._sdr.close()
+            except Exception:
+                pass
+            self._sdr = None
+
+    # ------------------------------------------------------------------
+    # Hot-swapping control
+    # ------------------------------------------------------------------
+
+    def set_freq(self, hz: int) -> None:
+        """Change center frequency without stopping the stream."""
+        self.freq = hz
+        if self._sdr:
+            try:
+                self._sdr.center_freq = hz
+                log.info(f'Frequency → {hz / 1e6:.3f} MHz')
+            except Exception as e:
+                log.warning(f'set_freq: {e}')
+
+    def set_gain(self, db: float) -> None:
+        """Change gain without stopping the stream. 0.0 is a valid manual value."""
+        self.gain = db
+        if self._sdr:
+            try:
+                # Explicitly disable tuner AGC (enable manual gain)
+                self._sdr.set_manual_gain_enabled(True)
+                self._sdr.gain = db
+                log.info(f'Gain → {db} dB (manual)')
+            except Exception as e:
+                log.warning(f'set_gain: {e}')
+
+    def set_tuner_agc(self, enabled: bool) -> None:
+        """Enable or disable Tuner AGC without stopping the stream."""
+        self.tuner_agc = enabled
+        if self._sdr:
+            try:
+                if enabled:
+                    self._sdr.gain = 'auto'
+                    log.info('Tuner AGC → ON')
+                else:
+                    self._sdr.gain = self.gain
+                    log.info(f'Tuner AGC → OFF gain = {self.gain} dB')
+            except Exception as e:
+                log.warning(f'set_tuner_agc: {e}')
+
+    def set_ppm(self, ppm: int) -> None:
+        """Change frequency correction in PPM without stopping the stream."""
+        self.ppm = ppm
+        if self._sdr:
+            try:
+                self._sdr.freq_correction = ppm
+                log.info(f'PPM → {ppm}')
+            except Exception as e:
+                log.warning(f'set_ppm: {e}')
+
+    # ------------------------------------------------------------------
+    # Reader Thread
+    # ------------------------------------------------------------------
+
+    def _reopen(self):
+        """
+        Re-open and reconfigure the dongle after a dropout.
+        Called automatically by _reader_loop when self._sdr is None.
+        The full import-error diagnostics live in start(); here we just
+        reconnect assuming the package is already available.
+        """
+        from rtlsdr import RtlSdr
+        log.info(f'PyRtlSdrSource: reopening device [{self.device_index}]...')
+        self._sdr = RtlSdr(device_index=self.device_index)
+        self._sdr.sample_rate = self.sample_rate
+        self._sdr.center_freq = self.freq
+        if self.ppm != 0:
+            try:
+                self._sdr.freq_correction = self.ppm
+            except Exception as e:
+                log.warning(f'freq_correction ({self.ppm} PPM): {e}')
+        if self.tuner_agc or self.gain == 0:
+            self._sdr.gain = 'auto'
+        else:
+            self._sdr.gain = self.gain
+        try:
+            self._sdr.set_agc_mode(1 if self.rtl_agc else 0)
+        except Exception:
+            pass
+        log.info(f'PyRtlSdrSource: device [{self.device_index}] reopened successfully')
+
+    def _reader_loop(self):
+        """
+        Reads CHUNK_SAMPLES complex samples from the dongle
+        and puts them in the IQ queue.
+
+        pyrtlsdr returns normalized complex128 ≈ ±1.0 (already converts
+        uint8 → float which RtlTcpSource does manually).
+        We cast it to complex64 for uniformity with the rest of the pipeline.
+
+        On error (USB dropout, buffer overflow, driver hiccup) the dongle is
+        closed, and the loop retries after 5 s — mirroring RtlTcpSource.
+        """
+        while self._running:
+            try:
+                if self._sdr is None:
+                    self._reopen()
+
+                samples = self._sdr.read_samples(CHUNK_SAMPLES)
+                iq = np.asarray(samples, dtype=np.complex64)
+                try:
+                    self._queue.put_nowait(iq)
+                except queue.Full:
+                    # Catch-up policy: discard oldest to maintain real-time
+                    try:
+                        self._queue.get_nowait()
+                        self._queue.put_nowait(iq)
+                    except Exception:
+                        pass
+
+            except Exception as e:
+                if self._running:
+                    log.error(f'PyRtlSdrSource error: {e}. Retrying in 5s...')
+                    if self._sdr:
+                        try:
+                            self._sdr.close()
+                        except Exception:
+                            pass
+                        self._sdr = None
+
+                    # Wait 5 s, bailing out immediately if stop() is called
+                    for _ in range(50):
+                        if not self._running:
+                            break
+                        time.sleep(0.1)
+
+        # Thread exit — ensure dongle is released
+        if self._sdr:
+            try:
+                self._sdr.close()
+            except Exception:
+                pass
+            self._sdr = None
+
+    # ------------------------------------------------------------------
+    # Static Utilities
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def list_devices() -> list[dict]:
+        """List connected RTL-SDR dongles."""
+        try:
+            from rtlsdr import RtlSdr
+            count = RtlSdr.get_device_count()
+            result = []
+            for i in range(count):
+                name = RtlSdr.get_device_name(i)
+                result.append({'index': i, 'name': name})
+            return result
+        except ImportError:
+            log.warning('pyrtlsdr not available')
+            return []
+        except Exception as e:
+            log.warning(f'Error listing devices: {e}')
+            return []

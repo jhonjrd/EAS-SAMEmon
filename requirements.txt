@@ -1,0 +1,9 @@
+numpy
+scipy
+rich
+fastapi
+uvicorn[standard]
+sounddevice
+pyrtlsdr==0.2.93
+setuptools<82
+requests
