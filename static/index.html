@@ -1103,8 +1103,8 @@ tbody td { padding: 7px 10px; vertical-align: middle; }
   </div>
 
   <!-- Home Assistant Settings Modal -->
-  <div id="ha-modal-overlay" class="modal-overlay" onclick="closeHaModal(event)">
-    <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 450px;">
+  <div id="ha-modal-overlay" class="modal-overlay">
+    <div class="modal-card" style="max-width: 450px;">
       <div class="modal-header">
         <div class="modal-title" data-i18n="ha.title">Home Assistant Integration</div>
         <div class="modal-close" onclick="closeHaModal()">&times;</div>
@@ -1112,14 +1112,10 @@ tbody td { padding: 7px 10px; vertical-align: middle; }
       <div class="modal-body">
 
         <div class="ctrl-section">
-          <div class="ctrl-inline">
+          <div class="ctrl-row">
             <label class="ctrl-label" style="display:flex; align-items:center; gap:7px;">
               <span data-i18n="ha.webhook">Webhook URL</span>
               <button class="info-btn" onclick="openWebhookHelp()" tabindex="-1" title="Setup instructions / Instrucciones">ⓘ</button>
-            </label>
-            <label class="toggle">
-              <input type="checkbox" id="modal-webhook-enable">
-              <span class="toggle-track"></span>
             </label>
           </div>
           <div class="ctrl-row">
@@ -1131,7 +1127,8 @@ tbody td { padding: 7px 10px; vertical-align: middle; }
 
       </div>
       <div class="modal-footer">
-        <button class="btn-close-modal" onclick="closeHaModal()" style="margin-right: 8px;" data-i18n="modal.cancel">Cancel</button>
+        <button id="ha-cancel-btn" class="btn-close-modal" onclick="closeHaModal()" style="margin-right: 8px;" data-i18n="modal.cancel">Cancel</button>
+        <button class="btn-close-modal" id="ha-test-btn" onclick="testHaWebhook()" style="margin-right: 8px;" data-i18n="ha.test">Test Connection</button>
         <button class="btn-apply" id="ha-save-btn" onclick="saveHaSettingsFromModal()" data-i18n="ha.save">Save Changes</button>
       </div>
     </div>
@@ -1186,8 +1183,8 @@ tbody td { padding: 7px 10px; vertical-align: middle; }
   </div>
 
   <!-- RTL-SDR Hardware Modal -->
-  <div id="hw-modal-overlay" class="modal-overlay" onclick="closeHwModal(event)">
-    <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 450px;">
+  <div id="hw-modal-overlay" class="modal-overlay">
+    <div class="modal-card" style="max-width: 450px;">
       <div class="modal-header" style="background: #1c2128; border-bottom: 2px solid var(--blue);">
         <div class="modal-title" style="display: flex; align-items: center; gap: 10px;">
           <img src="https://www.rtl-sdr.com/wp-content/uploads/2022/12/rtl-sdrv3-1019x1024.jpg" width="30" style="border-radius: 4px; filter: brightness(1.2);">
@@ -1265,7 +1262,7 @@ tbody td { padding: 7px 10px; vertical-align: middle; }
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-close-modal" onclick="closeHwModal()" style="margin-right: 8px;" data-i18n="modal.cancel">Cancel</button>
+        <button id="hw-cancel-btn" class="btn-close-modal" onclick="closeHwModal()" style="margin-right: 8px;" data-i18n="modal.cancel">Cancel</button>
         <button class="btn-apply" onclick="applyHardware()" data-i18n="hw.applyRestart">Apply &amp; Restart Source</button>
       </div>
     </div>
@@ -1360,6 +1357,11 @@ const TRANSLATIONS = {
     'ha.webhook':     'Webhook URL',
     'ha.save':        'Save Changes',
     'ha.saved':       '✓ Settings saved successfully',
+    'ha.test':        'Test Connection',
+    'ha.testing':     'Testing…',
+    'ha.testNoUrl':   '⚠ Enter a URL first',
+    'ha.testOk':      code => `SUCCESS! HA reachable (HTTP ${code})`,
+    'ha.testFail':    msg  => `FAILED: ${msg}`,
     'ha.helpTitle':   'Configure Webhook in Home Assistant',
     // HW modal
     'hw.title':       'RTL-SDR Hardware Settings',
@@ -1478,6 +1480,11 @@ const TRANSLATIONS = {
     'ha.webhook':     'URL de Webhook',
     'ha.save':        'Guardar Cambios',
     'ha.saved':       '✓ Configuración guardada correctamente',
+    'ha.test':        'Test Connection',
+    'ha.testing':     'Probando…',
+    'ha.testNoUrl':   '⚠ Ingresa una URL primero',
+    'ha.testOk':      code => `SUCCESS! HA alcanzable (HTTP ${code})`,
+    'ha.testFail':    msg  => `FAILED: ${msg}`,
     'ha.helpTitle':   'Configurar Webhook en Home Assistant',
     // HW modal
     'hw.title':       'Configuración de Hardware RTL-SDR',
@@ -1756,7 +1763,7 @@ const ctrl = {
   volume:          0.8,
   event_filter:    [],
   integrations:    {
-    webhook: { enabled: false, url: '' }
+    webhook: { url: '' }
   }
 };
 
@@ -1886,10 +1893,11 @@ function updateStatus(d) {
 // ================================================================
 
 function openHwModal() {
+  const cancelBtn = document.getElementById('hw-cancel-btn');
+  if (cancelBtn) { cancelBtn.setAttribute('data-i18n', 'modal.cancel'); cancelBtn.textContent = t('modal.cancel'); }
   document.getElementById('hw-modal-overlay').classList.add('visible');
 }
-function closeHwModal(e) {
-  if (e && e.target !== document.getElementById('hw-modal-overlay')) return;
+function closeHwModal() {
   document.getElementById('hw-modal-overlay').classList.remove('visible');
 }
 
@@ -2098,13 +2106,13 @@ function updateAlert(active, msg) {
 // ================================================================
 
 function openHaModal() {
-  // Sync form with current state before opening
   updateIntegrationsUI(ctrl.integrations);
+  const cancelBtn = document.getElementById('ha-cancel-btn');
+  if (cancelBtn) { cancelBtn.setAttribute('data-i18n', 'modal.cancel'); cancelBtn.textContent = t('modal.cancel'); }
   document.getElementById('ha-modal-overlay').classList.add('visible');
 }
 
-function closeHaModal(e) {
-  if (e && e.target !== document.getElementById('ha-modal-overlay')) return;
+function closeHaModal() {
   document.getElementById('ha-modal-overlay').classList.remove('visible');
 }
 
@@ -2122,8 +2130,7 @@ function closeWebhookHelp(e) {
 function saveHaSettingsFromModal() {
   const data = {
     webhook: {
-      enabled: document.getElementById('modal-webhook-enable').checked,
-      url:     document.getElementById('modal-webhook-url').value.trim() || '',
+      url: document.getElementById('modal-webhook-url').value.trim() || '',
     },
   };
 
@@ -2142,11 +2149,34 @@ function saveHaSettingsFromModal() {
     btn.disabled = false;
     btn.textContent = origText;
     status.style.display = 'block';
-    status.style.background = 'var(--green, #238636)22';
-    status.style.color = 'var(--green, #3fb950)';
-    status.style.border = '1px solid var(--green, #238636)55';
+    status.style.background = '#1a3d2a';
+    status.style.color      = 'var(--green)';
+    status.style.border     = '1px solid #2d5a3d';
     status.textContent = t('ha.saved');
+    const cancelBtn = document.getElementById('ha-cancel-btn');
+    if (cancelBtn) { cancelBtn.setAttribute('data-i18n', 'modal.close'); cancelBtn.textContent = t('modal.close'); }
   }, 600);
+}
+
+function testHaWebhook() {
+  const url    = document.getElementById('modal-webhook-url').value.trim();
+  const btn    = document.getElementById('ha-test-btn');
+  const status = document.getElementById('ha-status-msg');
+
+  if (!url) {
+    status.style.display  = 'block';
+    status.style.background = '#2d2300';
+    status.style.color      = 'var(--yellow)';
+    status.style.border     = '1px solid #5a4800';
+    status.textContent      = t('ha.testNoUrl');
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = t('ha.testing');
+  status.style.display = 'none';
+
+  sendCtrl('test_webhook', { url });
 }
 
 function updateIntegrationsUI(data) {
@@ -2154,9 +2184,6 @@ function updateIntegrationsUI(data) {
   ctrl.integrations = data;
 
   const web = data.webhook || {};
-
-  const wE = document.getElementById('modal-webhook-enable');
-  if (wE) wE.checked = !!web.enabled;
 
   const wU = document.getElementById('modal-webhook-url');
   if (wU) wU.value = web.url || '';
@@ -2432,6 +2459,8 @@ async function applyHardware() {
     setTimeout(() => {
       btn.textContent = oldText;
       btn.disabled = false;
+      const cancelBtn = document.getElementById('hw-cancel-btn');
+      if (cancelBtn) { cancelBtn.setAttribute('data-i18n', 'modal.close'); cancelBtn.textContent = t('modal.close'); }
     }, 1500);
 
   } catch (err) {
@@ -2491,7 +2520,7 @@ function connect() {
         }
         if (data.logs)     [...data.logs].reverse().forEach(l => addLogEntry(l, false));
         if (data.controls) {
-          updateControlsUI(data.controls);
+          initControls(data.controls);
           if (data.controls.integrations) {
             updateIntegrationsUI(data.controls.integrations);
           }
@@ -2517,6 +2546,26 @@ function connect() {
       case 'controls':
         initControls(data);
         break;
+      case 'webhook_test_result': {
+        const btn    = document.getElementById('ha-test-btn');
+        const status = document.getElementById('ha-status-msg');
+        if (btn) { btn.disabled = false; btn.textContent = t('ha.test'); }
+        if (status) {
+          status.style.display = 'block';
+          if (data.ok) {
+            status.style.background = '#1a3d2a';
+            status.style.color      = 'var(--green)';
+            status.style.border     = '1px solid #2d5a3d';
+            status.textContent      = t('ha.testOk', data.status_code);
+          } else {
+            status.style.background = '#3d1a1a';
+            status.style.color      = 'var(--red)';
+            status.style.border     = '1px solid #5a2d2d';
+            status.textContent      = t('ha.testFail', data.error || `HTTP ${data.status_code}`);
+          }
+        }
+        break;
+      }
       case 'delete_event':
         if (data && data.received_at) {
           // Remove from in-memory store so reRenderLive() doesn't resurrect it

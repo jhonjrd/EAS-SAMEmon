@@ -48,6 +48,7 @@ import datetime
 import logging
 import json
 import os
+import requests
 from collections import deque
 
 log = logging.getLogger(__name__)
@@ -609,14 +610,66 @@ class WebDashboard:
                 self._integrations = v or {}
                 if self._dispatcher:
                     self._dispatcher.reconfig(self._integrations)
-                
+
                 if getattr(self, '_save_pref', None):
                     self._save_pref('integrations', self._integrations)
-                
+
                 self._mgr.broadcast('controls', self._build_controls())
                 log.info("Home Assistant integrations updated.")
             except Exception as e:
                 log.warning(f'set_integrations: {e}')
+
+        elif t == 'test_webhook':
+            url = ((v or {}).get('url') or '').strip()
+            if not url:
+                self._mgr.broadcast('webhook_test_result', {
+                    'ok': False, 'status_code': None, 'error': 'No URL provided'
+                })
+            else:
+                async def _run_test(test_url):
+                    try:
+                        loop = asyncio.get_event_loop()
+                        resp = await loop.run_in_executor(
+                            None,
+                            lambda: requests.post(
+                                test_url,
+                                json={
+                                    'test': True,
+                                    'source': 'EAS-SAMEmon',
+                                    'message': 'Test webhook from EAS-SAMEmon',
+                                },
+                                timeout=10,
+                            ),
+                        )
+                        ok = resp.status_code < 400
+                        self._mgr.broadcast('webhook_test_result', {
+                            'ok':          ok,
+                            'status_code': resp.status_code,
+                            'error':       None,
+                        })
+                        log.info(f"Webhook test → HTTP {resp.status_code}: {test_url}")
+                    except requests.exceptions.Timeout:
+                        self._mgr.broadcast('webhook_test_result', {
+                            'ok': False, 'status_code': None, 'error': 'Connection timed out'
+                        })
+                        log.warning(f"Webhook test timed out: {test_url}")
+                    except requests.exceptions.ConnectionError:
+                        self._mgr.broadcast('webhook_test_result', {
+                            'ok': False, 'status_code': None, 'error': 'Connection refused'
+                        })
+                        log.warning(f"Webhook test connection refused: {test_url}")
+                    except requests.exceptions.InvalidURL:
+                        self._mgr.broadcast('webhook_test_result', {
+                            'ok': False, 'status_code': None, 'error': 'Invalid URL'
+                        })
+                        log.warning(f"Webhook test invalid URL: {test_url}")
+                    except Exception as exc:
+                        self._mgr.broadcast('webhook_test_result', {
+                            'ok': False, 'status_code': None, 'error': 'Connection failed'
+                        })
+                        log.warning(f"Webhook test error: {exc}")
+
+                asyncio.ensure_future(_run_test(url))
 
     # ------------------------------------------------------------------
     # Server in separate thread

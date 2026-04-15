@@ -45,7 +45,7 @@ class AlertDispatcher:
         self._providers = []
 
         webhook_cfg = config.get('webhook', {})
-        if webhook_cfg.get('enabled') and webhook_cfg.get('url'):
+        if webhook_cfg.get('url'):
             log.info(f"Webhook integration enabled: {webhook_cfg['url']}")
             self._providers.append(WebhookProvider(webhook_cfg))
 
