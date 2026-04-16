@@ -461,6 +461,21 @@ class WebDashboard:
         async def ws_control(ws: WebSocket):
             await ws.accept()
             await self._mgr.connect(ws)
+            # Prune expired messages from the in-memory deque before sending.
+            # end_dt is an ISO-format UTC string; messages without it never expire.
+            _now = datetime.datetime.now(datetime.timezone.utc)
+            def _still_active(m):
+                end = m.get('end_dt')
+                if not end:
+                    return True
+                try:
+                    return datetime.datetime.fromisoformat(end) > _now
+                except Exception:
+                    return True
+            self._messages = deque(
+                (m for m in self._messages if _still_active(m)),
+                maxlen=MAX_MESSAGES,
+            )
             # Full state upon connection
             await self._mgr.send_one(ws, 'hello', {
                 'status':   self._build_status(),
