@@ -2918,6 +2918,8 @@ function _purgeExpiredRows() {
     const endDt = tr.getAttribute('data-end-dt');
     if (!endDt) return;
     if (now >= new Date(endDt).getTime()) {
+      const ts = tr.getAttribute('data-ts');
+      if (ts) storedMessages = storedMessages.filter(m => m.received_at !== ts);
       tr.style.transition = 'opacity 0.6s ease-out';
       tr.style.opacity = '0';
       setTimeout(() => {
