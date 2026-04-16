@@ -800,10 +800,8 @@ def main():
             save_preference('hardware_last_mode', new_mode)
             
             try:
-                if source: source.stop()
+                if source: source.stop()   # blocks until reader thread exits cleanly
                 if dsp: dsp.stop()
-                import time
-                time.sleep(1.0)
                 
                 phys_freq = int(getattr(display, 'freq_mhz', 162.4) * 1e6)
 

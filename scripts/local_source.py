@@ -188,14 +188,21 @@ class PyRtlSdrSource:
         self._thread.start()
 
     def stop(self):
-        """Stop reading and close the dongle."""
+        """Signal the reader thread to stop and wait for it to exit cleanly.
+
+        IMPORTANT: Do NOT call self._sdr.close() here.
+        libusb is not thread-safe when closing a device from a different thread
+        while a transfer (read_samples) is in progress on the reader thread —
+        this triggers a pthread_mutex_lock assertion crash inside libusb.
+        The reader thread's cleanup block already calls close() safely from
+        its own context once _running is False and the current read finishes.
+        """
         self._running = False
-        if self._sdr:
-            try:
-                self._sdr.close()
-            except Exception:
-                pass
-            self._sdr = None
+        if self._thread and self._thread.is_alive():
+            # At 250 kHz / 16 384 samples per chunk ≈ 65 ms per read.
+            # The reader thread will notice _running=False within one chunk
+            # and close the device itself.  3 s timeout is a generous safety net.
+            self._thread.join(timeout=3.0)
 
     # ------------------------------------------------------------------
     # Hot-swapping control
