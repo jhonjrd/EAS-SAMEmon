@@ -203,6 +203,19 @@ class PyRtlSdrSource:
             # The reader thread will notice _running=False within one chunk
             # and close the device itself.  3 s timeout is a generous safety net.
             self._thread.join(timeout=3.0)
+            if self._thread.is_alive():
+                # Thread is hung inside read_samples() — there is no clean way
+                # to unblock it.  Force-close the device; this may trigger a
+                # libusb assertion crash (SIGABRT), which is acceptable because
+                # systemd will restart the service and recover automatically.
+                log.warning('PyRtlSdrSource: reader thread still alive after join '
+                            '— force-closing device to unblock read_samples()')
+                if self._sdr:
+                    try:
+                        self._sdr.close()
+                    except Exception:
+                        pass
+                    self._sdr = None
 
     # ------------------------------------------------------------------
     # Hot-swapping control
@@ -319,7 +332,7 @@ class PyRtlSdrSource:
                     except Exception:
                         pass
 
-            except Exception as e:
+            except BaseException as e:
                 if self._running:
                     log.error(f'PyRtlSdrSource error: {e}. Retrying in 5s...')
                     if self._sdr:

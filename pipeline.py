@@ -26,6 +26,7 @@ import os
 import queue
 import threading
 import logging
+import time
 import argparse
 import datetime
 import json
@@ -755,9 +756,9 @@ def main():
             'ppm':    getattr(source, 'ppm', 0)
         }
 
-        def on_hardware_change(new_hw_dict):
+        def on_hardware_change(new_hw_dict, force=False):
             nonlocal source, source_label, dsp, current_hw_config
-            
+
             # Normalize new values
             new_mode   = new_hw_dict.get('mode', current_hw_config['mode'])
             new_device = int(new_hw_dict.get('device', 0))
@@ -772,15 +773,15 @@ def main():
                 new_host != current_hw_config['host'] or
                 new_port != current_hw_config['port']
             )
-            
+
             # Check if only PPM changed
             ppm_change = (new_ppm != current_hw_config['ppm'])
 
-            if not hard_change and not ppm_change:
+            if not force and not hard_change and not ppm_change:
                 display.log("Configuration is identical; skipping restart.", "info")
                 return
 
-            if not hard_change and ppm_change:
+            if not force and not hard_change and ppm_change:
                 # OPTIMIZATION: PPM change only, no hardware restart needed
                 try:
                     source.set_ppm(new_ppm)
@@ -908,6 +909,34 @@ def main():
 
         display.log('Listening for EAS/SASMEX messages… (Ctrl+C to exit)')
         dsp.start()
+
+        # ── IQ-stream watchdog ──────────────────────────────────────────────
+        # Monitors whether the chunk counter is still incrementing.  If it
+        # stalls for WATCHDOG_STALL seconds the reader thread has either hung
+        # inside read_samples() or died silently — both cases are unrecoverable
+        # without an explicit restart, so we force one here.
+        WATCHDOG_INTERVAL = 30   # seconds between checks
+        WATCHDOG_STALL    = 90   # seconds of no new chunks → forced restart
+
+        def _watchdog():
+            last_seen   = display._chunks
+            stall_since = time.monotonic()
+            while True:
+                time.sleep(WATCHDOG_INTERVAL)
+                now_chunks = display._chunks
+                if now_chunks != last_seen:
+                    last_seen   = now_chunks
+                    stall_since = time.monotonic()
+                elif time.monotonic() - stall_since >= WATCHDOG_STALL:
+                    display.log(
+                        f'Watchdog: IQ stream frozen for {WATCHDOG_STALL}s '
+                        '— forcing source restart', 'warn'
+                    )
+                    on_hardware_change(dict(current_hw_config), force=True)
+                    stall_since = time.monotonic()
+                    last_seen   = display._chunks
+
+        threading.Thread(target=_watchdog, name='iq-watchdog', daemon=True).start()
 
         try:
             decoder_loop(msg_queue, display,
