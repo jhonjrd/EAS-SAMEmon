@@ -366,6 +366,17 @@ The Webhook delivers a JSON object on every decoded alert. The structure is the 
 
 > **Note:** `areas_decoded[].place = "complete"` combined with `code = "000000"` indicates the alert covers the entire coverage area. Use the template condition shown in Step 3 to handle this case in your notification.
 
+#### Common event codes (`EEE`)
+
+| Code | Event |
+|------|-------|
+| `EQW` | Seismic Alert |
+| `RWT` | Required Weekly Test |
+| `RMT` | Required Monthly Test |
+| `EAN` | Emergency Action Notification |
+| `EVI` | Immediate Evacuation |
+| `CEM` | Civil Emergency Message |
+
 ---
 
 ### Automation examples
