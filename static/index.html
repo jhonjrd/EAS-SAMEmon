@@ -2218,7 +2218,12 @@ function addMessageRow(msg, flash) {
   if (flash) tr.className = 'flash';
   tr.setAttribute('data-eee', msg.EEE || '');
   tr.setAttribute('data-ts', msg.received_at || '');
-  if (msg.end_dt) tr.setAttribute('data-end-dt', msg.end_dt);
+  if (msg.received_at && msg.seconds) {
+    const purgeTs = new Date(msg.received_at).getTime() + msg.seconds * 1000;
+    tr.setAttribute('data-end-dt', new Date(purgeTs).toISOString());
+  } else if (msg.end_dt) {
+    tr.setAttribute('data-end-dt', msg.end_dt);
+  }
 
   const active = ctrl.event_filter || [];
   if (active.length > 0 && !active.includes(msg.EEE)) {

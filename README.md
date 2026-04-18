@@ -157,17 +157,17 @@ pip install -r requirements.txt
 
 ## 6. Usage Scenarios
 
-EAS/SAME signals are broadcast on the **NOAA Weather Radio (NWR) band**, shared across the US, Canada, and Mexico. Use `--channel` to select a frequency by number:
+EAS/SAME signals are broadcast across **7 channels**, each covering a different geographic area. Since each region uses a specific frequency, use `--channel` to select the one that corresponds to your receiver's location:
 
-| Channel | Frequency | Example coverage |
-|---------|-----------|-----------------|
-| 1 | 162.400 MHz | NOAA WX, CENAPRED (MX) |
-| 2 | 162.425 MHz | NOAA WX |
-| 3 | 162.450 MHz | NOAA WX, Teuhitl (MX) |
-| 4 | 162.475 MHz | NOAA WX, Chichinautzin (MX) |
-| 5 | 162.500 MHz | NOAA WX, Cuajimalpa (MX) |
-| 6 | 162.525 MHz | NOAA WX, Las Palmas (MX) |
-| 7 | 162.550 MHz | NOAA WX, Zacatenco (MX) |
+| Channel | Frequency |
+|---------|-----------|
+| 1 | 162.400 MHz |
+| 2 | 162.425 MHz |
+| 3 | 162.450 MHz |
+| 4 | 162.475 MHz |
+| 5 | 162.500 MHz |
+| 6 | 162.525 MHz |
+| 7 | 162.550 MHz |
 
 ### Decode a WAV file
 ```bash
