@@ -487,6 +487,8 @@ The Webhook delivers a JSON object on every decoded alert. The structure is the 
 
 ### Automation examples
 
+> Replace `notify.mobile_app_YOUR_DEVICE_ID` with your own Home Assistant mobile app notify service (e.g. `notify.mobile_app_pixel_8` or `notify.mobile_app_iphone_john`). Find yours under **Settings → Devices & Services → Companion App**.
+
 #### Notify on any alert
 
 ```yaml
@@ -494,22 +496,22 @@ trigger:
   - platform: webhook
     webhook_id: eassamemon_alert
 action:
-  - service: notify.mobile_app_sm_s928b
+  - service: notify.mobile_app_YOUR_DEVICE_ID
     data:
       title: >
-        ⚠️ {{ trigger.json.event_es }} ({{ trigger.json.EEE }})
+        ⚠️ {{ trigger.json.event }} ({{ trigger.json.EEE }})
       message: >
-        📡 {{ trigger.json.transmitter.name }} ({{ trigger.json.LLLLLLLL }})
+        📡 {{ trigger.json.LLLLLLLL }}
         {% if trigger.json.areas_decoded | selectattr('code', 'eq', '000000') | list | length > 0 %}
-        🏙️ Toda el área de cobertura SASMEX
+        🏙️ Entire coverage area
         {% else %}
         🏙️ {{ trigger.json.areas_decoded | map(attribute='place') | join(', ') }}
         {% endif %}
-        🕐 Válido hasta: {{ trigger.json.end }}
-        ⏱️ Duración: {{ trigger.json.length }}
+        🕐 Valid until: {{ trigger.json.end }}
+        ⏱️ Duration: {{ trigger.json.length }}
 ```
 
-#### Notify only on seismic alerts (EQW)
+#### Notify only on tornado warnings (TOR)
 
 Use a condition to filter by event type. The automation still triggers on every webhook, but the action only runs when the event code matches.
 
@@ -519,31 +521,22 @@ trigger:
     webhook_id: eassamemon_alert
 condition:
   - condition: template
-    value_template: "{{ trigger.json.EEE == 'EQW' }}"
+    value_template: "{{ trigger.json.EEE == 'TOR' }}"
 action:
-  - service: notify.mobile_app_sm_s928b
+  - service: notify.mobile_app_YOUR_DEVICE_ID
     data:
-      title: "🚨 ALERTA SÍSMICA SASMEX"
+      title: "🌪️ Tornado Warning"
       message: >
-        📡 {{ trigger.json.transmitter.name }} ({{ trigger.json.LLLLLLLL }})
+        📡 {{ trigger.json.LLLLLLLL }}
         {% if trigger.json.areas_decoded | selectattr('code', 'eq', '000000') | list | length > 0 %}
-        🏙️ Toda el área de cobertura SASMEX
+        🏙️ Entire coverage area
         {% else %}
         🏙️ {{ trigger.json.areas_decoded | map(attribute='place') | join(', ') }}
         {% endif %}
-        🕐 Válido hasta: {{ trigger.json.end }}
+        🕐 Valid until: {{ trigger.json.end }}
 ```
 
-The same pattern works for any event code — replace `EQW` with the code you want to filter:
-
-| Code | Event |
-|---|---|
-| `EQW` | Seismic Alert (SASMEX) |
-| `RWT` | Required Weekly Test |
-| `RMT` | Required Monthly Test |
-| `EAN` | Emergency Action Notification |
-| `EVI` | Immediate Evacuation |
-| `CEM` | Civil Emergency Message |
+Replace `TOR` with any event code from the table above to filter for a different alert type.
 
 ---
 
