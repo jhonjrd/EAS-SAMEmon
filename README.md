@@ -366,16 +366,122 @@ The Webhook delivers a JSON object on every decoded alert. The structure is the 
 
 > **Note:** `areas_decoded[].place = "complete"` combined with `code = "000000"` indicates the alert covers the entire coverage area. Use the template condition shown in Step 3 to handle this case in your notification.
 
-#### Common event codes (`EEE`)
+#### Event codes (`EEE`)
+
+**National / Tests**
+
+| Code | Event |
+|------|-------|
+| `EAN` | Emergency Action Notification |
+| `EAT` | Emergency Action Termination |
+| `NIC` | National Information Center |
+| `NPT` | National Periodic Test |
+| `RMT` | Required Monthly Test |
+| `RWT` | Required Weekly Test |
+| `DMO` | Practice/Demo Warning |
+| `ADR` | Administrative Message |
+
+**Seismic**
 
 | Code | Event |
 |------|-------|
 | `EQW` | Seismic Alert |
-| `RWT` | Required Weekly Test |
-| `RMT` | Required Monthly Test |
-| `EAN` | Emergency Action Notification |
-| `EVI` | Immediate Evacuation |
+
+**Civil Emergencies / Safety**
+
+| Code | Event |
+|------|-------|
+| `AVA` | Avalanche Watch |
+| `AVW` | Avalanche Warning |
+| `BLU` | Blue Alert |
+| `CAE` | Child Abduction Emergency (AMBER Alert) |
+| `CDW` | Civil Danger Warning |
 | `CEM` | Civil Emergency Message |
+| `EVI` | Evacuation Immediate |
+| `FRW` | Fire Warning |
+| `HMW` | Hazardous Materials Warning |
+| `LAE` | Local Area Emergency |
+| `LEW` | Law Enforcement Warning |
+| `NUW` | Nuclear Power Plant Warning |
+| `RHW` | Radiological Hazard Warning |
+| `SPW` | Shelter in Place Warning |
+| `TOE` | 911 Telephone Outage Emergency |
+| `VOW` | Volcano Warning |
+
+**Biological and Health Hazards**
+
+| Code | Event |
+|------|-------|
+| `BHW` | Biological Hazard Warning |
+| `BWW` | Boil Water Warning |
+| `FCW` | Food Contamination Warning |
+| `IFW` | Industrial Fire Warning |
+
+**Severe Weather — Watches**
+
+| Code | Event |
+|------|-------|
+| `BZA` | Blizzard Watch |
+| `CFA` | Coastal Flood Watch |
+| `DSA` | Dust Storm Watch |
+| `EQA` | Earthquake Watch |
+| `EVA` | Evacuation Watch |
+| `EXA` | Extreme Wind Watch |
+| `FFA` | Flash Flood Watch |
+| `FLA` | Flood Watch |
+| `HTA` | Hurricane Force Wind Watch |
+| `HUA` | Hurricane Watch |
+| `HWA` | High Wind Watch |
+| `SVA` | Severe Thunderstorm Watch |
+| `TOA` | Tornado Watch |
+| `TRA` | Tropical Storm Watch |
+| `TSA` | Tsunami Watch |
+| `WFA` | Wildfire Watch |
+| `WSA` | Winter Storm Watch |
+
+**Severe Weather — Warnings**
+
+| Code | Event |
+|------|-------|
+| `BZW` | Blizzard Warning |
+| `CFW` | Coastal Flood Warning |
+| `DSW` | Dust Storm Warning |
+| `EWW` | Extreme Wind Warning |
+| `FFW` | Flash Flood Warning |
+| `FLW` | Flood Warning |
+| `FSW` | Flash Freeze Warning |
+| `FGW` | Dense Fog Warning |
+| `HTW` | Hurricane Force Wind Warning |
+| `HUW` | Hurricane Warning |
+| `HWW` | High Wind Warning |
+| `IBW` | Iceberg Warning |
+| `LSW` | Land Slide Warning |
+| `MAW` | Marine Warning |
+| `SMW` | Special Marine Warning |
+| `SQW` | Snow Squall Warning |
+| `SSA` | Storm Surge Watch |
+| `SSW` | Storm Surge Warning |
+| `SVR` | Severe Thunderstorm Warning |
+| `TOR` | Tornado Warning |
+| `TRW` | Tropical Storm Warning |
+| `TSW` | Tsunami Warning |
+| `WFW` | Wildfire Warning |
+| `WSW` | Winter Storm Warning |
+
+**Bulletins and Statements**
+
+| Code | Event |
+|------|-------|
+| `FFS` | Flash Flood Statement |
+| `FLS` | Flood Statement |
+| `FLY` | Flood Advisory |
+| `HLS` | Hurricane Local Statement |
+| `HWY` | High Wind Advisory |
+| `MWS` | Marine Weather Statement |
+| `NOW` | Short Term Forecast |
+| `POS` | Power Outage Statement |
+| `SPS` | Special Weather Statement |
+| `SVS` | Severe Weather Statement |
 
 ---
 
