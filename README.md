@@ -293,42 +293,78 @@ Each trace shows the full trigger payload under **Trigger variables**, including
 
 ### JSON payload reference
 
-The Webhook delivers a JSON object on every decoded alert. Below is a real example captured from a live SASMEX message:
+The Webhook delivers a JSON object on every decoded alert. The structure is the same regardless of country; only the values and the `transmitter` field vary.
+
+#### United States (US)
 
 ```json
 {
-  "ORG":       "CTV",
-  "EEE":       "RWT",
-  "COUNTRY":   "MX",
-  "event":     "Required Weekly Test",
-  "event_es":  "Prueba Semanal Requerida",
+  "ORG":             "WXR",
+  "EEE":             "RWT",
+  "TTTT":            "0100",
+  "JJJHHMM":         "1051700",
+  "LLLLLLLL":        "KEC83000",
+  "COUNTRY":         "US",
+  "event":           "Required Weekly Test",
+  "event_es":        "Prueba Semanal Requerida",
+  "organization":    "National Weather Service",
+  "organization_es": "Servicio Nacional de Meteorología",
+  "start":           "11:00 AM",
+  "end":             "11:01 AM",
+  "start_dt":        "2026-04-15T17:00:00+00:00",
+  "end_dt":          "2026-04-15T17:01:00+00:00",
+  "length":          "1 minute",
+  "seconds":         60,
+  "PSSCCC_list":     ["008031", "008005", "008059", "008001"],
+  "areas_decoded": [
+    {"code": "008031", "place": "Denver",    "state": "Colorado"},
+    {"code": "008005", "place": "Arapahoe", "state": "Colorado"},
+    {"code": "008059", "place": "Jefferson", "state": "Colorado"},
+    {"code": "008001", "place": "Adams",     "state": "Colorado"}
+  ],
+  "transmitter":  {},
+  "received_at":  "2026-04-15T17:00:08.412300+00:00"
+}
+```
+
+#### Mexico (MX)
+
+```json
+{
+  "ORG":             "CTV",
+  "EEE":             "RWT",
+  "TTTT":            "0300",
+  "JJJHHMM":         "1041518",
+  "LLLLLLLL":        "XMEX/037",
+  "COUNTRY":         "MX",
+  "event":           "Required Weekly Test",
+  "event_es":        "Prueba Semanal Requerida",
   "organization":    "Civil Authority",
   "organization_es": "Autoridad Civil",
-  "LLLLLLLL":  "XMEX/037",
+  "start":           "09:18 AM",
+  "end":             "12:18 PM",
+  "start_dt":        "2026-04-14T09:18:00+00:00",
+  "end_dt":          "2026-04-14T12:18:00+00:00",
+  "length":          "3 hours",
+  "seconds":         10800,
+  "PSSCCC_list": ["009009", "009000", "009004", "009005"],
+  "areas_decoded": [
+    {"code": "009009", "place": "Milpa Alta",            "state": "Ciudad de México"},
+    {"code": "009000", "place": "complete",              "state": "Ciudad de México"},
+    {"code": "009004", "place": "Cuajimalpa de Morelos", "state": "Ciudad de México"},
+    {"code": "009005", "place": "Gustavo A. Madero",     "state": "Ciudad de México"}
+  ],
   "transmitter": {
     "name":      "Las Palmas",
     "freq_mhz":  162.525,
     "entidad":   "EDOMEX",
     "municipio": "Huixquilucan"
   },
-  "start":    "09:18 AM",
-  "end":      "12:18 PM",
-  "start_dt": "2026-04-14T09:18:00+00:00",
-  "end_dt":   "2026-04-14T12:18:00+00:00",
-  "length":   "3 hours",
-  "seconds":  10800,
-  "PSSCCC_list": ["009009", "009000", "009004", "009005"],
-  "areas_decoded": [
-    {"code": "009009", "place": "Milpa Alta",   "state": "Ciudad de México"},
-    {"code": "009000", "place": "complete",     "state": "Ciudad de México"},
-    {"code": "009004", "place": "Cuajimalpa de Morelos", "state": "Ciudad de México"},
-    {"code": "009005", "place": "Gustavo A. Madero",     "state": "Ciudad de México"}
-  ],
   "received_at": "2026-04-14T09:18:39.725751+00:00"
 }
 ```
 
-> **Note:** `areas_decoded[].place = "complete"` combined with `code = "000000"` indicates the alert covers the entire SASMEX coverage area. Use the template condition shown in Step 3 to handle this case in your notification.
+> **Note:** `areas_decoded[].place = "complete"` combined with `code = "000000"` indicates the alert covers the entire coverage area. Use the template condition shown in Step 3 to handle this case in your notification.
 
 ---
 
