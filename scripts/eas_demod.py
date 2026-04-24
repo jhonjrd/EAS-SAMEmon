@@ -9,6 +9,8 @@ Features:
 - Implements bit-clock phase tracking (DLL) and 2-of-3 voting.
 """
 
+import time
+
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -29,6 +31,10 @@ HEADER_BEGIN = 'ZCZC'
 EOM_MARKER   = 'NNNN'
 MAX_MSG_LEN  = 268
 MAX_STORE    = 3         # repetitions to store for 2-of-3 voting
+# TTL (s) for deduplicating identical ZCZC bursts within a single transmission.
+# Covers the 3 SAME header repetitions (~3 s apart) without blocking identical
+# content that repeats hours later (e.g., weekly RWT with fixed JJJHHMM).
+DEDUP_TTL_S  = 30
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +107,7 @@ class EASDemod:
         self.msgno       = 0
         self.msglen      = 0
         self.last_message = ''
+        self._last_message_ts = 0.0
         # Counter for partial EOM bursts.
         self._nnnn_bursts = 0
         # Bit error tolerance
@@ -282,9 +289,13 @@ class EASDemod:
                 if idx >= 0:
                     msg = msg[:idx + 1]
                 
-                # If it's a new message, emit immediately
-                if msg and msg != self.last_message:
+                # Emit if new content OR same content after dedup TTL expired
+                # (prevents cross-transmission dedup when NNNN is missed)
+                now = time.monotonic()
+                is_fresh = (msg != self.last_message) or (now - self._last_message_ts > DEDUP_TTL_S)
+                if msg and is_fresh:
                     self.last_message = msg
+                    self._last_message_ts = now
                     self.callback(f'ZCZC{self.last_message}')
                     self._nnnn_bursts = 0
                 
