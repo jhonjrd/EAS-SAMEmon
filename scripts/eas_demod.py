@@ -47,6 +47,56 @@ def _is_allowed(ch: int) -> bool:
     return ch in (10, 13) or (32 <= ch <= 126)
 
 
+def _dedup_key(s: str) -> str:
+    """Structural prefix of a SAME message excluding the LLLLLLLL field.
+    Format: ...+TTTT-JJJHHMM-LLLLLLLL-  → returns up to the '-' after
+    JJJHHMM. Used for dedup so bit-flips in the (often truncated) callsign
+    don't fool us into emitting the 3 header repetitions as 3 messages."""
+    plus = s.find('+')
+    if plus < 0:
+        return s
+    d1 = s.find('-', plus)
+    if d1 < 0:
+        return s
+    d2 = s.find('-', d1 + 1)
+    return s[:d2 + 1] if d2 >= 0 else s
+
+
+def _vote_messages(msgs):
+    """Strict char-by-char majority vote across stored bursts. Positions
+    without ≥2 matching chars become '?'. Single-burst input returns as-is
+    (no false confidence loss when only 1 of 3 bursts decoded)."""
+    msgs = [m for m in msgs if m]
+    if not msgs:
+        return ''
+    if len(msgs) == 1:
+        return msgs[0]
+    L = max(len(m) for m in msgs)
+    out = []
+    for i in range(L):
+        chars = [m[i] for m in msgs if i < len(m)]
+        counts = {}
+        for c in chars:
+            counts[c] = counts.get(c, 0) + 1
+        best_char, best_n = max(counts.items(), key=lambda kv: kv[1])
+        out.append(best_char if best_n >= 2 else '?')
+    return ''.join(out)
+
+
+def _trim_keep_callsign(msg: str) -> str:
+    """Trim message to standard SAME format ending in '-', but preserve a
+    truncated callsign-like tail (1-8 chars in [A-Z0-9/?]). SASMEX TXs
+    routinely cut carrier ~30 ms early, dropping the final '3-' off
+    LLLLLLLL; this keeps what we have so alertparser can pad with '?'."""
+    idx = msg.rfind('-')
+    if idx < 0:
+        return msg
+    tail = msg[idx + 1:][:8]
+    if tail and all(c.isalnum() or c in '/?' for c in tail):
+        return msg[:idx + 1] + tail + '-'
+    return msg[:idx + 1]
+
+
 # ---------------------------------------------------------------------------
 # Main class
 # ---------------------------------------------------------------------------
@@ -283,31 +333,61 @@ class EASDemod:
 
         else:
             if self.l2_state == 'READING_MESSAGE':
-                # Clip until last '-' (standard SAME format)
-                msg = self.msg_buf[0]
-                idx = msg.rfind('-')
-                if idx >= 0:
-                    msg = msg[:idx + 1]
-                
-                # Emit if new content OR same content after dedup TTL expired
-                # (prevents cross-transmission dedup when NNNN is missed)
+                # The current burst's raw content is in msg_buf[msgno].
+                # SAME spec sends 3 identical header repetitions. Strategy:
+                #   - Burst 1: emit immediately (low latency — EEE is what
+                #     matters for alerting; callsign is metadata).
+                #   - Bursts 2-3: char-by-char majority vote; if the voted
+                #     message differs (refined callsign, fewer noise chars),
+                #     emit a corrected version. Consumers should dedup on
+                #     _dedup_key (structural prefix) and treat the most
+                #     recent emission as authoritative.
                 now = time.monotonic()
-                is_fresh = (msg != self.last_message) or (now - self._last_message_ts > DEDUP_TTL_S)
-                if msg and is_fresh:
+                # If the new burst's structural prefix doesn't match what
+                # we already accumulated (different alert with no EOM in
+                # between, or expired TTL), reset and treat as burst 1.
+                cur_raw = self.msg_buf[self.msgno]
+                cur_trim = _trim_keep_callsign(cur_raw)
+                if (self.msgno > 0 and self.last_message and
+                    (_dedup_key(cur_trim) != _dedup_key(self.last_message)
+                     or now - self._last_message_ts > DEDUP_TTL_S)):
+                    # Different alert with no EOM in between (or stale TTL):
+                    # drop accumulated bursts and treat current as burst 1.
+                    self.msg_buf = [''] * MAX_STORE
+                    self.msg_buf[0] = cur_raw
+                    self.msgno = 0
+
+                # Vote over all bursts collected so far (this one included).
+                stored = [m for m in self.msg_buf[: self.msgno + 1] if m]
+                voted_raw = _vote_messages(stored)
+                msg = _trim_keep_callsign(voted_raw)
+
+                is_fresh = (_dedup_key(msg) != _dedup_key(self.last_message)
+                            or now - self._last_message_ts > DEDUP_TTL_S)
+                if msg and (is_fresh or msg != self.last_message):
+                    # Emit on first burst (fresh) or when a later vote
+                    # produces a different (refined) message.
                     self.last_message = msg
                     self._last_message_ts = now
                     self.callback(f'ZCZC{self.last_message}')
                     self._nnnn_bursts = 0
-                
-                # Bursts 2 and 3 are ignored if they match self.last_message
-                self.msg_buf[0] = ''
+
+                # Advance to next slot for the next burst (cap at MAX_STORE-1;
+                # any extra burst overwrites the last slot harmlessly).
+                if self.msgno < MAX_STORE - 1:
+                    self.msgno += 1
+                    self.msg_buf[self.msgno] = ''
+                else:
+                    self.msg_buf[self.msgno] = ''
 
             elif self.l2_state == 'READING_EOM':
+                self._flush_pending_message()
                 if self.last_message:
                     self.callback('NNNN')
                     self.last_message = ''  # Indicates no active message
-                self._nnnn_bursts = 0 
-                self.msg_buf[0]   = ''
+                self._nnnn_bursts = 0
+                self.msg_buf = [''] * MAX_STORE
+                self.msgno = 0
 
             elif self.l2_state == 'HEADER_SEARCH':
                 # Partial EOM (SASMEX / Short preamble)
@@ -315,12 +395,14 @@ class EASDemod:
                 if self.headlen >= 1 and all(c == 'N' for c in self.head_buf):
                     self._nnnn_bursts += 1
                     # If we detect bursts with N's and have an active message, emit EOM
-                    if self._nnnn_bursts >= 1: 
+                    if self._nnnn_bursts >= 1:
+                        self._flush_pending_message()
                         if self.last_message:
                             self.callback('NNNN')
                             self.last_message = ''
                         self._nnnn_bursts = 0
-                        self.msg_buf[0]   = ''
+                        self.msg_buf = [''] * MAX_STORE
+                        self.msgno = 0
                 else:
                     # If we receive something other than 'N', reset accumulated bursts
                     if self.headlen > 0:
@@ -331,6 +413,21 @@ class EASDemod:
             self.head_buf = ''
             self.headlen  = 0
             self.msglen   = 0
+
+    def _flush_pending_message(self):
+        """Best-effort emit of held single-burst content when EOM arrives
+        before quorum (≥2 bursts) was reached. Avoids losing the alert
+        entirely if 2 of the 3 header repetitions were missed."""
+        if self.last_message:
+            return
+        stored = [m for m in self.msg_buf if m]
+        if not stored:
+            return
+        msg = _trim_keep_callsign(_vote_messages(stored))
+        if msg:
+            self.last_message = msg
+            self._last_message_ts = time.monotonic()
+            self.callback(f'ZCZC{msg}')
 
     def _check_and_emit(self):
         """Not used in immediate burst mode."""
