@@ -44,6 +44,13 @@ SUBSAMP           = 2    # window step (oversampling factor)
 INTEGRATOR_MAXVAL = 10
 DLL_GAIN          = 0.2
 SQUELCH_THRESHOLD = 0.001
+# Force-close the current SAME burst if the carrier (squelch) stays closed
+# this many consecutive subsamples while in READING_MESSAGE. SASMEX EQW
+# repeats the header with only ~93 ms gap; without this, byte_counter and
+# the L2 buffer leak across bursts and the 2-of-3 vote fails on garbage
+# positions. 750 subsamples @ SUBSAMP=2, fs=25000 ≈ 60 ms — safely
+# shorter than 93 ms but long enough not to fire on a single fade.
+CARRIER_OFF_RESET_SS = 750
 
 PREAMBLE     = 0xAB      # preamble byte (LSB first on wire = 11010101)
 HEADER_BEGIN = 'ZCZC'
@@ -167,14 +174,15 @@ class EASDemod:
     # State Reset
     # ------------------------------------------------------------------
     def _l1_reset(self):
-        self.sphase         = 0.0
-        self.dcd_shreg      = 0
-        self.bit_shreg      = 0
-        self.dcd_integrator = 0
-        self.lasts          = 0
-        self.l1_sync        = False
-        self.byte_counter   = 0
-        self._subsamp_skip  = 0   # samples to skip at start of next chunk
+        self.sphase            = 0.0
+        self.dcd_shreg         = 0
+        self.bit_shreg         = 0
+        self.dcd_integrator    = 0
+        self.lasts             = 0
+        self.l1_sync           = False
+        self.byte_counter      = 0
+        self._subsamp_skip     = 0   # samples to skip at start of next chunk
+        self._carrier_off_run  = 0   # consecutive sub-samples below squelch
 
     def _l2_reset(self):
         # L2: IDLE | HEADER_SEARCH | READING_MESSAGE | READING_EOM
@@ -234,9 +242,9 @@ class EASDemod:
         si_seq = si[self._subsamp_skip :: SUBSAMP]
         sq_seq = sq[self._subsamp_skip :: SUBSAMP]
 
-        # Vectorize energy calculation for full block (much faster than Doing it in loop)
+        # Vectorize energy calculation for full block (much faster than doing it in loop)
         pwr_seq = mi_seq**2 + mq_seq**2 + si_seq**2 + sq_seq**2
-        
+
         # Constant phase increment to save one multiplication per iteration
         phase_inc = self.phase_inc
 
@@ -251,7 +259,18 @@ class EASDemod:
                 if not self.l1_sync:
                     self.sphase = 0.0
                     self.dcd_integrator = 0
+                # Force-close the current SAME burst if the carrier stays
+                # off long enough that we know we're between bursts. Without
+                # this, SASMEX EQW (93 ms inter-burst gap) leaks bytes from
+                # one repetition into the next slot and breaks 2-of-3 vote.
+                self._carrier_off_run += 1
+                if (self.l2_state == 'READING_MESSAGE' and
+                        self._carrier_off_run >= CARRIER_OFF_RESET_SS):
+                    self._carrier_off_run = 0
+                    self._eas_frame(0x00)
+                    self.l1_sync = False
                 continue
+            self._carrier_off_run = 0
             # ---- DCD shift register (Sample Rate - for DLL) ----
             bit_now = 1 if f > 0 else 0
             self.dcd_shreg = ((self.dcd_shreg << 1) | bit_now) & 0xFF
