@@ -290,16 +290,16 @@ In the automation created in Step 1, add an action. Switch to YAML mode (`< >` i
 service: notify.mobile_app_YOUR_DEVICE
 data:
   title: >
-    ⚠️ {{ trigger.json.event_es }} ({{ trigger.json.EEE }})
+    ⚠️ {{ trigger.json.event }} ({{ trigger.json.EEE }})
   message: >
-    📡 {{ trigger.json.transmitter.name }} ({{ trigger.json.LLLLLLLL }})
+    📡 {{ trigger.json.LLLLLLLL }}
     {% if trigger.json.areas_decoded | selectattr('code', 'eq', '000000') | list | length > 0 %}
-    🏙️ Toda el área de cobertura SASMEX
+    🏙️ Entire coverage area
     {% else %}
     🏙️ {{ trigger.json.areas_decoded | map(attribute='place') | join(', ') }}
     {% endif %}
-    🕐 Válido hasta: {{ trigger.json.end }}
-    ⏱️ Duración: {{ trigger.json.length }}
+    🕐 Valid until: {{ trigger.json.end }}
+    ⏱️ Duration: {{ trigger.json.length }}
 ```
 
 Replace `YOUR_DEVICE` with the name of your device. You can find it under **Settings → Apps → Companion App → Device name**, or by searching for `notify.mobile_app_` in the service picker — it will match the name of your phone (e.g. `notify.mobile_app_sm_s928b`).
