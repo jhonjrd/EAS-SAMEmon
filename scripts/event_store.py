@@ -135,6 +135,35 @@ class EventStore:
             except Exception as e:
                 log.error(f'EventStore.save: {e}')
 
+    def save_raw(self, raw: str, received_at: 'datetime.datetime | None' = None,
+                 reason: str = '', stage: str = 'final') -> None:
+        """Persist a frame that did not fully decode (or that we want to keep
+        regardless of validity). Stores the raw string, an empty/UNK shape,
+        and the reject reason inside extra_json."""
+        if received_at is None:
+            received_at = datetime.datetime.now(datetime.timezone.utc)
+        ts_iso = received_at.isoformat() if hasattr(received_at, 'isoformat') else str(received_at)
+
+        extra = {'reject_reason': reason, 'stage': stage, 'undecoded': True}
+        row = (
+            ts_iso, '', '', '', '', '', '', '[]', '', '', '', 0,
+            raw if isinstance(raw, str) else str(raw),
+            json.dumps(extra, ensure_ascii=False),
+        )
+        with self._lock:
+            try:
+                with self._connect() as conn:
+                    conn.execute(
+                        """INSERT INTO events
+                           (received_at, EEE, ORG, COUNTRY, event_name,
+                            organization, LLLLLLLL, PSSCCC, start_time,
+                            end_time, length, seconds, raw_message, extra_json)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        row,
+                    )
+            except Exception as e:
+                log.error(f'EventStore.save_raw: {e}')
+
     # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------

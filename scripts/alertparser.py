@@ -264,7 +264,7 @@ def alert_start(JJJHHMM, fmt='%j%H%M'):
     timestamp = calendar.timegm(utc_dt.timetuple())
     return datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc)
 
-def fn_dt(dt, fmt='%I:%M %p'):
+def fn_dt(dt, fmt='%I:%M:%S %p'):
     """Formats datetime converting it to system local time if it is UTC."""
     if dt.tzinfo is None:
         # If naive, assume it's already local (backwards compatibility)
@@ -288,6 +288,46 @@ def alert_end(JJJHHMM, TTTT):
 def alert_length(TTTT):
     delta = datetime.timedelta(hours=int(TTTT[:2]), minutes=int(TTTT[2:]))
     return int(delta.total_seconds())
+
+def add_purge_time(dt, TTTT):
+    """Agrega purge time a un datetime. Retorna el datetime resultante."""
+    delta = datetime.timedelta(hours=int(TTTT[:2]), minutes=int(TTTT[2:]))
+    return dt + delta
+
+def format_local_time(dt, tz_offset=-6):
+    """Formatea un datetime UTC a hora local como 'HH:MM:SS AM/PM'.
+
+    Args:
+        dt: datetime en UTC
+        tz_offset: offset de timezone en horas (default: -6 para Mexico)
+    """
+    try:
+        # Asegurar que es UTC-aware
+        if dt.tzinfo is None:
+            utc_dt = dt.replace(tzinfo=datetime.timezone.utc)
+        else:
+            # Si ya tiene timezone, convertir a UTC primero
+            utc_dt = dt.astimezone(datetime.timezone.utc)
+
+        # Aplicar offset de timezone (UTC-6)
+        tz = datetime.timezone(datetime.timedelta(hours=tz_offset))
+        local_dt = utc_dt.astimezone(tz)
+
+        # Extraer componentes
+        hour = local_dt.hour
+        minute = local_dt.minute
+        second = local_dt.second
+
+        # Convertir a 12h format
+        hour_12 = hour % 12
+        if hour_12 == 0:
+            hour_12 = 12
+        ampm = 'AM' if hour < 12 else 'PM'
+
+        return f'{hour_12:02d}:{minute:02d}:{second:02d} {ampm}'
+    except Exception as e:
+        logging.error(f"Error in format_local_time: {e}")
+        return str(dt)
 
 # ---------------------------------------------------------------------------
 # Area decoding functions

@@ -13,6 +13,8 @@ env/
 
 # EAS-SAMEmon runtime files
 *.db
+audiologs/
+framelogs/
 
 # Claude Code
 .claude/

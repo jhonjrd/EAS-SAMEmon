@@ -42,6 +42,7 @@ from eas_demod     import EASDemod
 from display        import SasmexDisplay
 from web_dashboard  import WebDashboard
 from audio_monitor  import AudioMonitor, MessageAudioRecorder
+from frame_logger   import FrameLogger
 from event_store    import EventStore
 import alertparser
 import mx_defs
@@ -119,9 +120,13 @@ class DSPWorker(threading.Thread):
         self.fm  = FMDemod(fs_in=sample_rate)
         self.eas = EASDemod(callback=self._on_frame, sample_rate=AUDIO_RATE)
 
-    def _on_frame(self, raw_msg: str):
+    def _on_frame(self, raw_msg: str, stage: str = 'final'):
+        # Dual-path emission (see eas_demod.py docstring):
+        #   stage='preliminary' → fast: webhook + audio recorder trigger
+        #   stage='final'       → slow: persistence + display + JSON
+        #   stage='eom'         → end-of-message marker (consumers may ignore)
         try:
-            self.msg_queue.put_nowait((raw_msg, 0.0))
+            self.msg_queue.put_nowait((raw_msg, 0.0, stage))
         except queue.Full:
             log.warning('msg_queue full — dropping EAS frame')
 
@@ -155,7 +160,8 @@ def decoder_loop(msg_queue: queue.Queue, display,
                  json_dir: str | None,
                  msg_recorder: 'MessageAudioRecorder | None' = None,
                  event_store:  'EventStore | None' = None,
-                 dispatcher:   'AlertDispatcher | None' = None):
+                 dispatcher:   'AlertDispatcher | None' = None,
+                 frame_logger: 'FrameLogger | None' = None):
     """
     Takes raw frames from msg_queue, processes them through alertparser.same_decode(),
     and updates the display.
@@ -164,53 +170,73 @@ def decoder_loop(msg_queue: queue.Queue, display,
         try:
             payload = msg_queue.get(timeout=1.0)
             if isinstance(payload, tuple):
-                raw, ch_freq = payload
+                if len(payload) == 3:
+                    raw, ch_freq, stage = payload
+                elif len(payload) == 2:
+                    raw, ch_freq = payload
+                    stage = 'final'
+                else:
+                    raw, ch_freq, stage = payload[0], 0.0, 'final'
             else:
                 # Safety fallback
-                raw, ch_freq = payload, 0.0
+                raw, ch_freq, stage = payload, 0.0, 'final'
         except queue.Empty:
             continue
 
-        display.log(f'Frame EAS: {raw}')
-
-        # Skip EOM frames silently — NNNN is end-of-message, not a SAME header
-        if raw.strip() == 'NNNN':
+        # End-of-message: log only, do not decode/dispatch.
+        if stage == 'eom' or raw.strip() == 'NNNN':
+            display.log('Frame EAS: NNNN (EOM)')
+            if frame_logger:
+                frame_logger.log(raw or 'NNNN', decoded=None)
             continue
+
+        display.log(f'Frame EAS [{stage}]: {raw}')
 
         try:
             received_at = datetime.datetime.now(datetime.timezone.utc)
-            result = _decode_frame(raw, event_filter, same_filter)
+            result = _decode_frame(raw, event_filter, same_filter, received_at)
             if result:
-                # Timestamp system time before passing to display and store
-                result['received_at'] = received_at.isoformat()
+                if frame_logger:
+                    frame_logger.log(raw, decoded=True)
                 if ch_freq > 0.0:
                     result['channel_mhz'] = ch_freq
+                result['stage'] = stage
 
-                display.add_message(result)
+                if stage == 'preliminary':
+                    # FAST PATH — minimize latency for Alerta Sísmica.
+                    # Trigger webhook and audio recorder on the FIRST burst.
+                    # Do NOT persist yet; the 'final' emission will carry the
+                    # 2-of-3 voted (canonical) message.
+                    if msg_recorder:
+                        msg_recorder.trigger(
+                            event_code  = result.get('EEE', 'UNK'),
+                            received_at = received_at,
+                        )
+                    if dispatcher:
+                        dispatcher.dispatch(result)
 
-                if json_dir:
-                    _save_json(result, json_dir)
-
-                # Persist in history
-                if event_store:
-                    event_store.save(result)
-
-                # Start recording the message audio
-                if msg_recorder:
-                    msg_recorder.trigger(
-                        event_code  = result.get('EEE', 'UNK'),
-                        received_at = received_at,
-                    )
-
-                # External Integrations (Home Assistant Webhook)
-                if dispatcher:
-                    dispatcher.dispatch(result)
+                elif stage == 'final':
+                    # SLOW PATH — consolidated message, safe to persist.
+                    display.add_message(result)
+                    if json_dir:
+                        _save_json(result, json_dir)
+                    if event_store:
+                        event_store.save(result)
             else:
                 reason = _diagnose_frame(raw, event_filter, same_filter)
                 display.log(f'Frame descartado — {reason}', 'warn')
+                if frame_logger:
+                    frame_logger.log(raw, decoded=False, reject_reason=reason)
+                # Persist raw frame even when decoder rejected it (final stage
+                # only, to avoid duplicating preliminary+final pairs).
+                if event_store and stage == 'final':
+                    event_store.save_raw(raw, received_at=received_at,
+                                         reason=reason, stage=stage)
         except Exception as e:
             log.error(f'Decode error: {e}', exc_info=True)
             display.log(f'Error decodificando frame: {e}', 'error')
+            if frame_logger:
+                frame_logger.log(raw, decoded=False, reject_reason=f'exception: {e}')
 
 
 def _diagnose_frame(raw: str, event_filter: list, same_filter: list) -> str:
@@ -242,11 +268,13 @@ def _diagnose_frame(raw: str, event_filter: list, same_filter: list) -> str:
 
 
 def _decode_frame(raw: str, event_filter: list,
-                  same_filter: list) -> dict | None:
+                  same_filter: list, received_at: datetime.datetime = None) -> dict | None:
     """
     Calls alertparser.same_decode() in silent mode and returns
     the message data dict, or None if filtered.
     """
+    if received_at is None:
+        received_at = datetime.datetime.now(datetime.timezone.utc)
     # Clean and parse the message
     try:
         cleaned = alertparser.clean_msg(raw)
@@ -300,6 +328,12 @@ def _decode_frame(raw: str, event_filter: list,
         place, state = alertparser.county_decode(c, COUNTRY)
         areas_decoded.append({'code': c, 'place': place, 'state': state})
 
+    # Calculate valid_until_real = received_at + TTTT
+    try:
+        valid_until_real = alertparser.add_purge_time(received_at, TTTT)
+    except Exception:
+        valid_until_real = received_at
+
     return {
         'ORG':          ORG,
         'EEE':          EEE,
@@ -315,6 +349,12 @@ def _decode_frame(raw: str, event_filter: list,
         'end':          alertparser.fn_dt(end),
         'start_dt':     start.isoformat(),
         'end_dt':       end.isoformat(),
+        # received_at is the canonical ISO 8601 timestamp — used by the
+        # SQLite store (range queries) and the web UI (Date parsing).
+        # received_at_display is the human-friendly "HH:MM:SS AM/PM" string.
+        'received_at':         received_at.isoformat(),
+        'received_at_display': alertparser.format_local_time(received_at),
+        'valid_until_real': alertparser.format_local_time(valid_until_real),
         'length':       alertparser.get_length(TTTT),
         'seconds':      alertparser.alert_length(TTTT),
         'PSSCCC_list':  PSSCCC_list,
@@ -688,6 +728,10 @@ def main():
     if args.save_audiomsgs:
         msg_recorder = MessageAudioRecorder(save_dir=args.save_audiomsgs)
 
+    # frame_logger is created after the AudioMonitor exists so it can
+    # snapshot its metrics with every frame observation.
+    frame_logger = None
+
     monitor_vol = prefs.get('volume', args.volume)
     
     # --- Audio monitor ---
@@ -709,6 +753,9 @@ def main():
             volume          = monitor_vol,
             enable_playback = bool(args.audio),
         )
+
+    # Per-frame diagnostic log (always on), metrics sourced from monitor if any.
+    frame_logger = FrameLogger(save_dir='framelogs', audio_monitor=monitor)
 
     # ── Create Display ────────────────────────────────────────────────────────
     #
@@ -907,6 +954,8 @@ def main():
                 f'({event_store.count()} events stored)', 'ok'
             )
 
+        display.log(f'Frame diagnostic log → framelogs/', 'ok')
+
         display.log('Listening for EAS/SASMEX messages… (Ctrl+C to exit)')
         dsp.start()
 
@@ -945,7 +994,8 @@ def main():
                          json_dir=args.json_dir,
                          msg_recorder=msg_recorder,
                          event_store=event_store,
-                         dispatcher=dispatcher)
+                         dispatcher=dispatcher,
+                         frame_logger=frame_logger)
         except KeyboardInterrupt:
             display.log('Stopping…', 'warn')
         finally:

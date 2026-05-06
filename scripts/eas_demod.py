@@ -7,6 +7,25 @@ Features:
 - Direct port of quadrature IQ correlation algorithms.
 - Accepts float32 PCM audio @ 25000 Hz.
 - Implements bit-clock phase tracking (DLL) and 2-of-3 voting.
+
+Callback contract (dual-path emission):
+    callback(msg: str, stage: str)
+
+    stage='preliminary' — exactly once per alert, on the FIRST decoded burst.
+        Use for low-latency actions: webhook (Alerta Sísmica), audio recorder.
+        msg may contain noise chars in fields beyond EEE; trust EEE/PSSCCC.
+
+    stage='final' — exactly once per alert, after consolidation.
+        Emitted when any of these happens (whichever first):
+          (a) all 3 burst repetitions have been processed,
+          (b) EOM marker (NNNN) is detected,
+          (c) FINAL_TIMEOUT_S of silence after the last seen burst.
+        Use for persistence: event_store, display, JSON dump.
+        msg is the result of char-by-char 2-of-3 majority voting (or single-
+        burst content when fewer bursts decoded).
+
+    stage='eom' — End-Of-Message marker received (msg is empty string).
+        Optional; consumers may ignore.
 """
 
 import time
@@ -34,7 +53,11 @@ MAX_STORE    = 3         # repetitions to store for 2-of-3 voting
 # TTL (s) for deduplicating identical ZCZC bursts within a single transmission.
 # Covers the 3 SAME header repetitions (~3 s apart) without blocking identical
 # content that repeats hours later (e.g., weekly RWT with fixed JJJHHMM).
-DEDUP_TTL_S  = 30
+DEDUP_TTL_S    = 30
+# How long to wait after the last seen burst before forcing a 'final' emit
+# if no further bursts arrive and no EOM is detected. SAME bursts are ~1 s
+# apart; 6 s gives ample margin for 3 bursts plus jitter.
+FINAL_TIMEOUT_S = 6.0
 
 
 # ---------------------------------------------------------------------------
@@ -87,12 +110,17 @@ def _trim_keep_callsign(msg: str) -> str:
     """Trim message to standard SAME format ending in '-', but preserve a
     truncated callsign-like tail (1-8 chars in [A-Z0-9/?]). SASMEX TXs
     routinely cut carrier ~30 ms early, dropping the final '3-' off
-    LLLLLLLL; this keeps what we have so alertparser can pad with '?'."""
+    LLLLLLLL; this keeps what we have so alertparser can pad with '?'.
+
+    A tail consisting entirely of '?' is treated as carrier-decay noise that
+    survived the 2-of-3 vote (bursts disagreed in every position past the
+    real end of frame) and is dropped — otherwise the stored raw frame ends
+    in spurious '-????????-' that wasn't on the air."""
     idx = msg.rfind('-')
     if idx < 0:
         return msg
     tail = msg[idx + 1:][:8]
-    if tail and all(c.isalnum() or c in '/?' for c in tail):
+    if tail and all(c.isalnum() or c in '/?' for c in tail) and any(c != '?' for c in tail):
         return msg[:idx + 1] + tail + '-'
     return msg[:idx + 1]
 
@@ -162,6 +190,11 @@ class EASDemod:
         self._nnnn_bursts = 0
         # Bit error tolerance
         self.bad_byte_counter = 0
+        # Dual-path emission state (per active alert).
+        self._first_emitted   = False   # 'preliminary' already emitted?
+        self._finalized       = False   # 'final' already emitted?
+        self._preliminary_msg = ''      # what we sent as preliminary
+        self._final_deadline  = 0.0     # monotonic; 0 = inactive
 
     # ------------------------------------------------------------------
     # Public API
@@ -171,6 +204,10 @@ class EASDemod:
         Process float32 audio array @ 25000 Hz.
         Can be called repeatedly with chunks of any size >= CORRLEN.
         """
+        # Force-finalize a pending alert if too much time has passed since
+        # the last burst (timeout path of dual-path emission).
+        self._check_final_timeout()
+
         samples = np.asarray(samples, dtype=np.float32)
 
         # Concatenate overlap from previous chunk
@@ -333,47 +370,42 @@ class EASDemod:
 
         else:
             if self.l2_state == 'READING_MESSAGE':
-                # The current burst's raw content is in msg_buf[msgno].
-                # SAME spec sends 3 identical header repetitions. Strategy:
-                #   - Burst 1: emit immediately (low latency — EEE is what
-                #     matters for alerting; callsign is metadata).
-                #   - Bursts 2-3: char-by-char majority vote; if the voted
-                #     message differs (refined callsign, fewer noise chars),
-                #     emit a corrected version. Consumers should dedup on
-                #     _dedup_key (structural prefix) and treat the most
-                #     recent emission as authoritative.
+                # SAME sends 3 identical header repetitions. Dual-path
+                # emission strategy (see module docstring):
+                #   - 'preliminary' once on burst 1 (low latency for alerting).
+                #   - 'final'       once after quorum / EOM / timeout, with
+                #                   the consolidated voted message.
                 now = time.monotonic()
-                # If the new burst's structural prefix doesn't match what
-                # we already accumulated (different alert with no EOM in
-                # between, or expired TTL), reset and treat as burst 1.
                 cur_raw = self.msg_buf[self.msgno]
                 cur_trim = _trim_keep_callsign(cur_raw)
-                if (self.msgno > 0 and self.last_message and
-                    (_dedup_key(cur_trim) != _dedup_key(self.last_message)
+
+                # New alert mid-flight: previous alert never reached EOM/timeout.
+                # Force-finalize the prior alert and restart accumulation.
+                if (self.msgno > 0 and self._preliminary_msg and
+                    (_dedup_key(cur_trim) != _dedup_key(self._preliminary_msg)
                      or now - self._last_message_ts > DEDUP_TTL_S)):
-                    # Different alert with no EOM in between (or stale TTL):
-                    # drop accumulated bursts and treat current as burst 1.
-                    self.msg_buf = [''] * MAX_STORE
+                    self._emit_final()
+                    self._reset_alert_state()
                     self.msg_buf[0] = cur_raw
                     self.msgno = 0
 
-                # Vote over all bursts collected so far (this one included).
-                stored = [m for m in self.msg_buf[: self.msgno + 1] if m]
-                voted_raw = _vote_messages(stored)
-                msg = _trim_keep_callsign(voted_raw)
-
-                is_fresh = (_dedup_key(msg) != _dedup_key(self.last_message)
-                            or now - self._last_message_ts > DEDUP_TTL_S)
-                if msg and (is_fresh or msg != self.last_message):
-                    # Emit on first burst (fresh) or when a later vote
-                    # produces a different (refined) message.
-                    self.last_message = msg
+                # PRELIMINARY: emit once, on the very first burst.
+                if not self._first_emitted and cur_trim:
+                    self._first_emitted   = True
+                    self._preliminary_msg = cur_trim
                     self._last_message_ts = now
-                    self.callback(f'ZCZC{self.last_message}')
-                    self._nnnn_bursts = 0
+                    self.last_message     = cur_trim
+                    self.callback(f'ZCZC{cur_trim}', 'preliminary')
 
-                # Advance to next slot for the next burst (cap at MAX_STORE-1;
-                # any extra burst overwrites the last slot harmlessly).
+                # Track when to finalize if no more bursts arrive.
+                self._final_deadline = now + FINAL_TIMEOUT_S
+
+                # Quorum reached (3 bursts collected) → final immediately.
+                if self.msgno + 1 >= MAX_STORE:
+                    self._emit_final()
+
+                # Advance slot for next burst (cap at MAX_STORE-1; extra
+                # bursts overwrite last slot harmlessly).
                 if self.msgno < MAX_STORE - 1:
                     self.msgno += 1
                     self.msg_buf[self.msgno] = ''
@@ -381,28 +413,21 @@ class EASDemod:
                     self.msg_buf[self.msgno] = ''
 
             elif self.l2_state == 'READING_EOM':
-                self._flush_pending_message()
-                if self.last_message:
-                    self.callback('NNNN')
-                    self.last_message = ''  # Indicates no active message
-                self._nnnn_bursts = 0
-                self.msg_buf = [''] * MAX_STORE
-                self.msgno = 0
+                self._emit_final()
+                if self._first_emitted:
+                    self.callback('', 'eom')
+                self._reset_alert_state()
 
             elif self.l2_state == 'HEADER_SEARCH':
                 # Partial EOM (SASMEX / Short preamble)
                 # If we receive at least one 'N' in a burst with L1 sync
                 if self.headlen >= 1 and all(c == 'N' for c in self.head_buf):
                     self._nnnn_bursts += 1
-                    # If we detect bursts with N's and have an active message, emit EOM
                     if self._nnnn_bursts >= 1:
-                        self._flush_pending_message()
-                        if self.last_message:
-                            self.callback('NNNN')
-                            self.last_message = ''
-                        self._nnnn_bursts = 0
-                        self.msg_buf = [''] * MAX_STORE
-                        self.msgno = 0
+                        self._emit_final()
+                        if self._first_emitted:
+                            self.callback('', 'eom')
+                        self._reset_alert_state()
                 else:
                     # If we receive something other than 'N', reset accumulated bursts
                     if self.headlen > 0:
@@ -414,21 +439,45 @@ class EASDemod:
             self.headlen  = 0
             self.msglen   = 0
 
-    def _flush_pending_message(self):
-        """Best-effort emit of held single-burst content when EOM arrives
-        before quorum (≥2 bursts) was reached. Avoids losing the alert
-        entirely if 2 of the 3 header repetitions were missed."""
-        if self.last_message:
+    # ------------------------------------------------------------------
+    # Dual-path emission helpers
+    # ------------------------------------------------------------------
+    def _emit_final(self):
+        """Emit the consolidated 'final' message exactly once per alert.
+        Idempotent: subsequent calls within the same alert are no-ops."""
+        if self._finalized or not self._first_emitted:
             return
         stored = [m for m in self.msg_buf if m]
-        if not stored:
-            return
-        msg = _trim_keep_callsign(_vote_messages(stored))
-        if msg:
-            self.last_message = msg
+        if stored:
+            voted = _trim_keep_callsign(_vote_messages(stored))
+        else:
+            voted = self._preliminary_msg
+        # If voting produced nothing usable, fall back to preliminary content.
+        if not voted:
+            voted = self._preliminary_msg
+        if voted:
+            self._finalized = True
+            self.last_message = voted
             self._last_message_ts = time.monotonic()
-            self.callback(f'ZCZC{msg}')
+            self.callback(f'ZCZC{voted}', 'final')
 
-    def _check_and_emit(self):
-        """Not used in immediate burst mode."""
-        pass
+    def _check_final_timeout(self):
+        """Called from process(): if a preliminary was emitted but no
+        EOM / 3rd burst arrived within FINAL_TIMEOUT_S, finalize now."""
+        if (self._first_emitted and not self._finalized and
+                self._final_deadline > 0 and
+                time.monotonic() >= self._final_deadline):
+            self._emit_final()
+            self._reset_alert_state()
+
+    def _reset_alert_state(self):
+        """Clear per-alert tracking after final/EOM. Preserves last_message
+        and _last_message_ts so dedup still works for repeat-bursts."""
+        self.msg_buf          = [''] * MAX_STORE
+        self.msgno            = 0
+        self.msglen           = 0
+        self._nnnn_bursts     = 0
+        self._first_emitted   = False
+        self._finalized       = False
+        self._preliminary_msg = ''
+        self._final_deadline  = 0.0

@@ -295,7 +295,12 @@ class WebDashboard:
 
     def add_message(self, msg: dict) -> None:
         enriched = dict(msg)
-        enriched['received_at'] = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+        # Decoder already sets received_at as ISO 8601; only fall back if
+        # add_message is invoked with a dict that lacks it (kept for safety).
+        enriched.setdefault(
+            'received_at',
+            datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
+        )
         self._messages.appendleft(enriched)
 
         eee = msg.get('EEE', '')
@@ -462,9 +467,18 @@ class WebDashboard:
             await ws.accept()
             await self._mgr.connect(ws)
             # Prune expired messages from the in-memory deque before sending.
-            # end_dt is an ISO-format UTC string; messages without it never expire.
+            # Expiry is received_at + seconds (purge counted from reception time).
+            # Falls back to end_dt if received_at/seconds are unavailable.
             _now = datetime.datetime.now(datetime.timezone.utc)
             def _still_active(m):
+                received = m.get('received_at')
+                secs = m.get('seconds')
+                if received and secs:
+                    try:
+                        purge_dt = datetime.datetime.fromisoformat(received) + datetime.timedelta(seconds=secs)
+                        return purge_dt > _now
+                    except Exception:
+                        pass
                 end = m.get('end_dt')
                 if not end:
                     return True
