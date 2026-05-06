@@ -105,17 +105,25 @@ EAS-SAMEmon (Root)/
 │
 ├── scripts/             ← Core Components
 │   ├── alertparser.py   ← EAS/SAME Parser (Business Logic)
-│   ├── eas_demod.py     ← Physical EAS Demodulator (AFSK)
+│   ├── eas_demod.py     ← Physical EAS Demodulator (AFSK + dual-path emission)
 │   ├── fm_demod.py      ← Narrowband FM Demodulator (IQ → PCM)
 │   ├── local_source.py  ← Local USB Interface (pyrtlsdr)
 │   ├── rtl_source.py    ← RTL-TCP Client (Network SDR)
 │   ├── web_dashboard.py ← FastAPI + WebSocket Server
+│   ├── audio_monitor.py ← FM audio playback / per-event WAV recorder
+│   ├── event_store.py   ← SQLite history (decoded + raw frames)
+│   ├── frame_logger.py  ← Per-frame diagnostic JSONL log (framelogs/)
+│   ├── integrations.py  ← Webhook / Home Assistant dispatcher
 │   ├── mx_defs.py       ← Mexico Definitions (SASMEX)
 │   ├── us_defs.py       ← USA Definitions (FIPS)
 │   └── ca_defs.py       ← Canada Definitions (CLC)
 │
 ├── tools/               ← Utilities
-│   └── decode_audio.py  ← WAV file decoder (Native)
+│   ├── decode_audio.py  ← WAV file decoder (native)
+│   ├── compare_bursts.py← Side-by-side view of the 3 header bursts
+│   ├── envelope.py      ← RMS envelope + FSK discriminator plot
+│   ├── raw_bits.py      ← Raw post-preamble byte dump (no trim)
+│   └── trace_demod.py   ← Timestamped demod + squelch trace
 │
 └── static/
     └── index.html       ← Web Dashboard (Premium UI)
@@ -129,6 +137,21 @@ The system uses a multi-threaded pipeline to ensure no critical audio samples ar
 1. **Source Thread**: Captures raw IQ samples from the RTL-SDR dongle.
 2. **DSP Thread**: Demodulates the FM signal and passes the audio to the EAS correlation engine.
 3. **App Thread**: Decodes the SAME text, stores it in SQLite, and distributes it via WebSockets to the Dashboard.
+
+### Dual-path EAS emission
+
+SAME headers are transmitted three times back-to-back. To minimize alert latency without sacrificing accuracy, the demodulator emits each alert in two stages:
+
+- **`preliminary`** — emitted on the **first** decoded burst (≈1 s after carrier-on). Used to fire low-latency actions: webhook dispatch and the per-event audio recorder. The `EEE` field is reliable; trailing fields may carry burst-1 noise.
+- **`final`** — emitted after **2-of-3 majority voting** across all three bursts (or sooner on EOM / timeout). Positions where bursts disagree become `?`. This is the version that gets persisted to the SQLite history, written to JSON, and shown in the dashboard.
+
+A separate `eom` marker is emitted when `NNNN` is detected; consumers may ignore it.
+
+### Diagnostic logs
+
+Every frame the demodulator hands to the decoder — preliminary, final, EOM, and rejected frames — is appended to `framelogs/{YYYY-MM-DD}.jsonl` with timestamps, raw payload, decode status, reject reason, and a snapshot of the audio metrics (`level_dbfs`, `snr_db`, `deviation`). This is the primary tool for diagnosing weak-signal or partial-decode issues after the fact.
+
+The SQLite history (`alerts_history.db`) also persists undecoded `final` frames via `EventStore.save_raw()`, so the raw bytes of malformed transmissions survive parser rejection.
 
 ---
 
@@ -322,8 +345,9 @@ The Webhook delivers a JSON object on every decoded alert. The structure is the 
     {"code": "008059", "place": "Jefferson", "state": "Colorado"},
     {"code": "008001", "place": "Adams",     "state": "Colorado"}
   ],
-  "transmitter":  {},
-  "received_at":  "2026-04-15T17:00:08.412300+00:00"
+  "transmitter":         {},
+  "received_at":         "2026-04-15T17:00:08.412300+00:00",
+  "received_at_display": "11:00:08 AM"
 }
 ```
 
@@ -360,11 +384,14 @@ The Webhook delivers a JSON object on every decoded alert. The structure is the 
     "entidad":   "EDOMEX",
     "municipio": "Huixquilucan"
   },
-  "received_at": "2026-04-14T09:18:39.725751+00:00"
+  "received_at":         "2026-04-14T09:18:39.725751+00:00",
+  "received_at_display": "03:18:39 AM"
 }
 ```
 
 > **Note:** `areas_decoded[].place = "complete"` combined with `code = "000000"` indicates the alert covers the entire coverage area. Use the template condition shown in Step 3 to handle this case in your notification.
+
+> **Timestamps:** `received_at` and `*_dt` fields are ISO 8601 (machine-readable, parseable by `Date()` / `datetime.fromisoformat()`). `start`, `end`, and `received_at_display` are pre-formatted strings for human display.
 
 #### Event codes (`EEE`)
 
