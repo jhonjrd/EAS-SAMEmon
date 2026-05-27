@@ -16,6 +16,11 @@ env/
 audiologs/
 framelogs/
 
+# Generated / sample audio (encoder output and recorded transmissions)
+*.wav
+*.flac
+*.ogg
+
 # Claude Code
 .claude/
 
