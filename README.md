@@ -125,8 +125,12 @@ EAS-SAMEmon (Root)/
 │   ├── raw_bits.py      ← Raw post-preamble byte dump (no trim)
 │   └── trace_demod.py   ← Timestamped demod + squelch trace
 │
-└── static/
-    └── index.html       ← Web Dashboard (Premium UI)
+├── static/
+│   └── index.html       ← Web Dashboard (Premium UI)
+│
+└── eas_simulator/           ← EAS encoder & RTL-SDR emulator (testing / development)
+    ├── eas_encode.py        ← AFSK/SAME audio encoder → WAV
+    └── eas_rtl_emulator.py  ← RTL-TCP server emulator (streams synthesized EAS IQ data)
 ```
 
 ---
@@ -152,6 +156,123 @@ A separate `eom` marker is emitted when `NNNN` is detected; consumers may ignore
 Every frame the demodulator hands to the decoder — preliminary, final, EOM, and rejected frames — is appended to `framelogs/{YYYY-MM-DD}.jsonl` with timestamps, raw payload, decode status, reject reason, and a snapshot of the audio metrics (`level_dbfs`, `snr_db`, `deviation`). This is the primary tool for diagnosing weak-signal or partial-decode issues after the fact.
 
 The SQLite history (`alerts_history.db`) also persists undecoded `final` frames via `EventStore.save_raw()`, so the raw bytes of malformed transmissions survive parser rejection.
+
+---
+
+## 4. EAS Dynamic Simulator and Generator
+
+> [!NOTE]
+> These tools are intended exclusively for **local testing and development**. They
+> generate synthetic EAS/SAME signals that are never broadcast over the air.
+> Over-the-air transmission of EAS codes or any simulation thereof is prohibited
+> — see the [Legal Disclaimer](#%EF%B8%8F-legal-disclaimer).
+
+The `eas_simulator/` directory contains two standalone tools that let you generate
+and inject synthetic EAS signals into EAS-SAMEmon without a physical RTL-SDR dongle
+or a live radio feed.
+
+---
+
+### `eas_encode.py` — EAS/SAME Audio Encoder
+
+Encodes a SAME header string to a standards-compliant AFSK WAV file (three bursts
++ optional EOM), ready to be decoded by `tools/decode_audio.py` or played back
+through `eas_rtl_emulator.py`.
+
+**Technical spec:**
+
+| Parameter | Value |
+|-----------|-------|
+| Modulation | AFSK (Audio FSK) |
+| Mark frequency | 2083.3 Hz |
+| Space frequency | 1562.5 Hz |
+| Baud rate | 520.833 Bd |
+| Preamble | 16 × 0xAB (LSB first) |
+| Structure | 3 bursts, 1 s silence between each, optional 3 × EOM |
+
+**Encode a specific message:**
+```bash
+cd eas_simulator
+python eas_encode.py --msg "ZCZC-CIV-EQW-000000+0001-3001723-XCMX/011-" --out alert.wav
+```
+
+**Generate and encode a random valid message:**
+```bash
+python eas_encode.py --random --out random_alert.wav
+python eas_encode.py --random --out random_alert.wav --rate 48000
+```
+
+**Decode the result immediately:**
+```bash
+python ../tools/decode_audio.py alert.wav
+```
+
+---
+
+### `eas_rtl_emulator.py` — RTL-SDR Emulator
+
+Implements the RTL-TCP protocol and streams NBFM-modulated EAS signals as IQ
+samples over TCP — making EAS-SAMEmon believe it is connected to a real RTL-SDR
+dongle. Supports two operating modes:
+
+- **File loop:** modulates an existing WAV file and streams it on repeat.
+- **Random generation:** synthesizes random valid EAS messages on the fly, one per
+  interval, spread across all 7 NWR channels (162.400 – 162.550 MHz).
+
+#### Connecting EAS-SAMEmon to the emulator
+
+**Step 1 — Start the emulator:**
+```bash
+cd eas_simulator
+
+# Random messages, wideband (all 7 NWR channels), every 2 s
+python eas_rtl_emulator.py --random --interval 2
+
+# Random messages, locked to channel 4 (162.475 MHz)
+python eas_rtl_emulator.py --random --channel 4 --interval 5
+
+# Stream a recorded WAV on channel 3
+python eas_rtl_emulator.py recording.wav --freq 162450000
+```
+
+**Step 2 — Connect EAS-SAMEmon as if to a remote RTL-SDR (from the repo root):**
+```bash
+python pipeline.py --host 127.0.0.1 --channel 3 --gain 0
+```
+
+#### Soundcard mode (no TCP)
+
+Plays the baseband audio directly through the system audio output — useful when
+testing with a hardware EAS decoder or a second receiver:
+
+```bash
+# List available output devices
+python eas_rtl_emulator.py --list-devices
+
+# Play random messages through the default output
+python eas_rtl_emulator.py --random --soundcard
+
+# Select a specific output device
+python eas_rtl_emulator.py --random --soundcard --soundcard-device 2
+```
+
+#### Full argument reference
+
+| Argument | Default | Description |
+|---|---|---|
+| `audio_file` | — | WAV/FLAC/OGG file to loop (mutually exclusive with `--random`) |
+| `--random` | off | Generate random EAS messages on the fly |
+| `--interval N` | `2` | Silence in seconds between messages (random mode) |
+| `--channel 1-7` | all | Lock to one NWR channel; omit to spread across all 7 |
+| `--host ADDR` | `0.0.0.0` | TCP bind address |
+| `--port N` | `1234` | TCP port |
+| `--freq HZ` | `162400000` | Center frequency reported to the client |
+| `--samplerate HZ` | `250000` | IQ sample rate |
+| `--deviation HZ` | `5000` | NBFM deviation (±5 kHz standard) |
+| `--soundcard` | off | Local audio output mode (no TCP server) |
+| `--soundcard-device` | default | Output device ID or name |
+| `--soundcard-rate HZ` | `48000` | Soundcard sample rate |
+| `--list-devices` | — | Print available audio devices and exit |
 
 ---
 
