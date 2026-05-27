@@ -119,11 +119,7 @@ EAS-SAMEmon (Root)/
 │   └── ca_defs.py       ← Canada Definitions (CLC)
 │
 ├── tools/               ← Utilities
-│   ├── decode_audio.py  ← WAV file decoder (native)
-│   ├── compare_bursts.py← Side-by-side view of the 3 header bursts
-│   ├── envelope.py      ← RMS envelope + FSK discriminator plot
-│   ├── raw_bits.py      ← Raw post-preamble byte dump (no trim)
-│   └── trace_demod.py   ← Timestamped demod + squelch trace
+│   └── decode_audio.py  ← WAV file decoder (native)
 │
 ├── static/
 │   └── index.html       ← Web Dashboard (Premium UI)
